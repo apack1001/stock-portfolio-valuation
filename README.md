@@ -69,3 +69,13 @@ Workflow:
 1. Initialize from natural language or screenshots, or update `~/Desktop/持仓/明细.csv`
 2. Run the script or ask for valuation in chat
 3. Review holdings, P&L, cash, and LTI summaries
+
+## Examples
+
+Privacy-obfuscated bookkeeping mockup:
+
+![Privacy-obfuscated bookkeeping mockup](assets/privacy-obfuscated-bookkeeping-mockup.png)
+
+Privacy-obfuscated valuation report mockup:
+
+![Privacy-obfuscated valuation report mockup](assets/privacy-obfuscated-valuation-report.png)
