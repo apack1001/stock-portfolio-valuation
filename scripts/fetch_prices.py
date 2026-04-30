@@ -392,7 +392,11 @@ if __name__ == "__main__":
         sys.exit(1)
     rows = load_csv()
     if rows is None:
-        print(json.dumps({"error": f"CSV文件不存在: {CSV_PATH}，请先导入持仓数据"}))
+        print(json.dumps({
+            "error": f"CSV文件不存在: {CSV_PATH}",
+            "hint": "首次使用可先运行: python3 ~/.claude/skills/stock-portfolio-valuation/scripts/init_portfolio.py",
+            "hint_2": "也可以直接提供股票/基金截图或自然语言持仓信息，由 skill 帮你初始化",
+        }, ensure_ascii=False))
         sys.exit(1)
     results = process(rows, fund_mode=args.fund_mode)
     print(json.dumps(results, ensure_ascii=False, indent=2))
