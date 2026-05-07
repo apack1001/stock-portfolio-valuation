@@ -16,6 +16,7 @@ def parse_tax_rate(note: str):
 CSV_PATH = Path.home() / "Desktop/持仓/明细.csv"
 _FUND_ESTIMATION_CACHE = None
 _GOLD_PRICE_CACHE = None
+_KGI_FUND_CACHE = {}
 
 def to_float(value):
     if value is None:
@@ -144,6 +145,61 @@ def fetch_fund_official_nav(code: str):
         return None, ""
     row = df.iloc[-1]
     return to_float(row.get("单位净值")), str(row.get("净值日期", ""))
+def fetch_kgi_fund_nav(code: str, currency: str):
+    """
+    尝试从 KGI 基金详情页抓取 USD/HKD 基金净值。
+    这是 FUND_HKD / FUND_USD 的首选自动来源；失败时由调用方回退快照。
+    """
+    global _KGI_FUND_CACHE
+    code = str(code or "").strip().upper()
+    currency = str(currency or "").strip().lower()
+    cache_key = (code, currency)
+    if cache_key in _KGI_FUND_CACHE:
+        return _KGI_FUND_CACHE[cache_key]
+
+    if not code or currency not in ("usd", "hkd"):
+        _KGI_FUND_CACHE[cache_key] = None
+        return None
+
+    import requests
+
+    # KGI 页面最后一段通常是 share class 代号；不同基金常见为 0 / c / r。
+    share_class_candidates = ("0", "c", "r")
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for share_class in share_class_candidates:
+        url = (
+            "https://www.kgi.com.hk/en/products-overview/wealth-products/mutual-funds/"
+            f"fund-detail?funds={code.lower()}%3A{currency}%3A{share_class}"
+        )
+        try:
+            resp = requests.get(url, headers=headers, timeout=15)
+            if resp.status_code != 200:
+                continue
+            text = resp.text
+            price_match = re.search(r"Price</span>.*?<span>([0-9.,]+)</span>", text, re.S)
+            date_match = re.search(r"Nav Date</span>.*?<span>([0-9.\-]+)</span>", text, re.S)
+            if not (price_match and date_match):
+                continue
+
+            price = to_float(price_match.group(1))
+            nav_date = date_match.group(1).replace(".", "-")
+            if price is None or not nav_date:
+                continue
+
+            result = {
+                "price": price,
+                "nav_date": nav_date,
+                "fund_source": "kgi_nav",
+                "updated_at": nav_date,
+                "url": url,
+            }
+            _KGI_FUND_CACHE[cache_key] = result
+            return result
+        except Exception:
+            continue
+
+    _KGI_FUND_CACHE[cache_key] = None
+    return None
 def price_cny_fund(row, fund_mode: str):
     """人民币公募基金：有 code + shares 时自动估值；失败则回退 CSV 快照。"""
     code = str(row.get("code", "")).strip()
@@ -183,6 +239,25 @@ def price_cny_fund(row, fund_mode: str):
         "fund_source": "official_nav",
         "nav_date": nav_date,
         "updated_at": nav_date or datetime.now().strftime("%Y-%m-%d %H:%M"),
+    }
+def price_offshore_fund(row):
+    """港元/美元基金：优先用 KGI 最新净值，失败则回退 CSV 快照。"""
+    code = str(row.get("code", "")).strip()
+    shares = to_float(row.get("shares", ""))
+    if not code or shares is None:
+        return None
+
+    priced = fetch_kgi_fund_nav(code, row.get("currency", ""))
+    if not priced:
+        return None
+
+    return {
+        "price": priced["price"],
+        "market_value": round(priced["price"] * shares, 2),
+        "fund_source": priced["fund_source"],
+        "nav_date": priced["nav_date"],
+        "updated_at": priced["updated_at"],
+        "source_url": priced["url"],
     }
 def price_gold_gram_asset(row):
     """黄金克数持仓：shares 按克，市值 = SGE Au99.99 价格 * 克数。"""
@@ -361,6 +436,45 @@ def process(rows, fund_mode="official"):
                 if priced and priced.get("mismatch"):
                     base["fund_pricing_error"] = "基金代码与行情源名称不匹配，已回退快照"
                     base["fund_name_from_source"] = priced.get("fund_name_from_source", "")
+        # 港元/美元基金：优先用 KGI 最新净值；失败再回退 CSV 快照
+        elif market in ("FUND_HKD", "FUND_USD") and row.get("category") == "基金":
+            cost = float(cost_total_s) if cost_total_s else 0
+            try:
+                priced = price_offshore_fund(row)
+            except Exception as e:
+                priced = None
+                base["fund_pricing_error"] = str(e)
+            if priced and priced.get("market_value") is not None:
+                shares = to_float(shares_s)
+                mv = priced["market_value"]
+                pnl = round(mv - cost, 2)
+                pnl_pct = round(pnl / cost * 100, 2) if cost > 0 else None
+                base.update({
+                    "shares": shares,
+                    "cost_price": None,
+                    "cost_total": cost,
+                    "price": round(priced["price"], 6),
+                    "market_value": mv,
+                    "pnl": pnl,
+                    "pnl_pct": pnl_pct,
+                    "updated_at": priced.get("updated_at", ""),
+                    "fund_source": priced.get("fund_source", ""),
+                })
+                for key in ("nav_date", "source_url"):
+                    if priced.get(key):
+                        base[key] = priced[key]
+            else:
+                mv = float(last_mv_s) if last_mv_s else 0
+                pnl = float(last_pnl_s) if last_pnl_s else 0
+                cost = float(cost_total_s) if cost_total_s else round(mv - pnl, 2)
+                pnl_pct = round(pnl / cost * 100, 2) if cost > 0 else None
+                base.update({
+                    "shares": to_float(shares_s), "cost_price": None, "cost_total": cost,
+                    "price": None, "market_value": mv,
+                    "pnl": pnl, "pnl_pct": pnl_pct,
+                    "updated_at": row.get("last_updated", ""),
+                    "fund_source": "snapshot",
+                })
         # 其他基金/活期：使用 CSV 存储值
         else:
             mv = float(last_mv_s) if last_mv_s else 0

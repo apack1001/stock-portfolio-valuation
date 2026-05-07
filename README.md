@@ -93,6 +93,12 @@ python3 scripts/fetch_prices.py
 python3 scripts/fetch_prices.py --fund-mode official
 ```
 
+Notes:
+
+- `FUND_CNY` funds prefer intraday estimated NAV, then fall back to official NAV.
+- `FUND_HKD` and `FUND_USD` funds now try to fetch latest NAV from KGI fund-detail pages first.
+- If an offshore fund cannot be resolved from the online source, the skill falls back to the local snapshot stored in `明细.csv`.
+
 ## Use
 
 Typical prompts:
