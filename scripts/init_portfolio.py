@@ -15,6 +15,7 @@ DETAIL_PATH = BASE_DIR / "明细.csv"
 TOTAL_PATH = BASE_DIR / "总额.csv"
 REALIZED_PATH = BASE_DIR / "已实现盈亏.csv"
 CASHFLOW_PATH = BASE_DIR / "未来现金流.csv"
+PROFILE_PATH = BASE_DIR / "profile.json"
 
 
 def ensure_csv(path: Path, header: list[str]) -> bool:
@@ -23,6 +24,28 @@ def ensure_csv(path: Path, header: list[str]) -> bool:
     with open(path, "w", encoding="utf-8-sig", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(header)
+    return True
+
+
+def ensure_profile(path: Path) -> bool:
+    if path.exists():
+        return False
+    path.write_text(
+        """{
+  "birth_year_month": null,
+  "years_worked": null,
+  "annual_spending_cny": null,
+  "annual_savings_cny": null,
+  "retirement_age": 63,
+  "lifespan_age": 79,
+  "current_social_security_personal_account_cny": null,
+  "historical_contribution_multiple": null,
+  "future_contribution_multiple": null,
+  "beijing_average_monthly_salary_cny_today": 12000
+}
+""",
+        encoding="utf-8",
+    )
     return True
 
 
@@ -87,6 +110,8 @@ def main():
         for path, header in optional_specs:
             if ensure_csv(path, header):
                 created.append(str(path))
+        if ensure_profile(PROFILE_PATH):
+            created.append(str(PROFILE_PATH))
 
     print(f"initialized_dir={BASE_DIR}")
     if created:
@@ -95,6 +120,7 @@ def main():
     else:
         print("created=none")
     print("next_step=you can now paste screenshots or describe holdings in natural language to fill 明细.csv")
+    print("next_step_2=if you want retirement planning, fill profile.json or run scripts/profile_manager.py")
 
 
 if __name__ == "__main__":

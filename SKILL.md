@@ -1,11 +1,12 @@
 ---
 name: stock-portfolio-valuation
-description: 从持仓CSV或本地截图读取持仓数据，支持首次初始化、实时获取最新行情，自动计算总估值、盈亏金额和盈亏比例，生成完整持仓报告。支持美股、港股、A股、基金（支付宝/腾讯理财通/富途理财）。当用户提到"看一下我的持仓"、"帮我初始化持仓"、"帮我估值"、"我的股票现在多少钱"、"持仓盈亏"、"买入"、"卖出"等时触发。
+description: 从持仓CSV或本地截图读取持仓数据，支持首次初始化、实时获取最新行情，自动计算总估值、盈亏金额和盈亏比例，生成完整持仓报告。支持美股、港股、A股、基金（支付宝/腾讯理财通/富途理财）。也支持退休测算，当用户提到"我什么时候可以不上班"、"几岁可以退休"时触发。
 ---
 # 股票持仓实时估值
 ## 数据源
 持仓数据的**唯一可信来源**是 `~/Desktop/持仓/明细.csv`。
 - 未来收入/支出计划记录在 `~/Desktop/持仓/未来现金流.csv`，例如年金保险领取、保费支出、未来确定性款项；这类现金流**不计入当前持仓市值**，只在退休/长期现金流测算中使用
+- 退休测算画像记录在 `~/Desktop/持仓/profile.json`，例如出生年月、工作年限、每年支出、每年可新增储蓄、社保相关参数
 - **非必要不从图片重新导入**：CSV 存在则直接加载
 - **每次买入/卖出/基金变动后立即更新 CSV**，再生成报告
 - 基金市值建议每周从 App 截图更新一次
@@ -29,6 +30,35 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/init_portfolio.py
 **C. 用户提供了新截图，需要补录或覆盖部分数据**：
 - 用 Read 工具读取图片，识别字段
 - 只更新截图对应的资产，不重置整份 CSV
+
+### Step 1.5：退休测算画像（当用户问“什么时候可以不上班”时）
+- 若 `~/Desktop/持仓/profile.json` 不存在，或缺少以下任一字段，则优先从用户输入中提取并保存：
+  - `birth_year_month`
+  - `years_worked`
+  - `annual_spending_cny`
+  - `annual_savings_cny`
+- 若用户还提供了这些信息，也一并保存：
+  - `retirement_age`
+  - `lifespan_age`
+  - `current_social_security_personal_account_cny`
+  - `historical_contribution_multiple`
+  - `future_contribution_multiple`
+- 保存方式：
+```bash
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/profile_manager.py --birth-year-month 1989-07 --years-worked 14.5 --annual-spending-cny 400000 --annual-savings-cny 500000
+```
+- 如需跑退休测算：
+```bash
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection.py
+```
+- 如需只看某个停工年龄：
+```bash
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection.py --stop-age 46
+```
+- 退休测算默认优先读取：
+  - `总额.csv` 最新 `total_cny`
+  - `未来现金流.csv`
+  - `profile.json`
 ---
 ### Step 2：处理交易（若用户报告了新买卖）
 **先更新 CSV，再生成报告：**
@@ -215,3 +245,4 @@ usd_cny, hkd_cny, usd_hkd = get_fx_rates()
 - **LTI 账户市值计入总资产，盈亏一律不计入统计**（在总览表和各分区小计中均排除）
 - 多次买入同一股票时，使用加权平均成本，不要单独记录每笔
 - 港股 akshare 偶发连接失败，失败时使用 CSV 中 `last_market_value` 快照值并注明 *
+- 退休测算属于**规划级估算**，不是社保局精算结果；如果用户问到“什么时候可以不上班”，应明确说明关键假设：是否考虑投资收益、通胀、未来养老金/年金、以及 `profile.json` 是否完整
