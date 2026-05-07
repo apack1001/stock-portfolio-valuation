@@ -67,10 +67,19 @@ Optional planning fields:
 You can let the skill save them from natural language, or update them manually with:
 
 ```bash
-python3 scripts/profile_manager.py --birth-year-month 1989-07 --years-worked 14.5 \
-  --annual-spending-cny 400000 --annual-savings-cny 500000
+python3 scripts/profile_manager.py --birth-year-month YYYY-MM --years-worked N \
+  --annual-spending-cny ANNUAL_SPENDING --annual-savings-cny ANNUAL_SAVINGS
 python3 scripts/profile_manager.py --show
 ```
+
+Typical natural-language inputs:
+
+- `我是90后，出生年月是YYYY-MM`
+- `我大概工作了十几年`
+- `我每年大致消费几十万`
+- `我每年能攒几十万`
+- `我的社保个人账户现在大约有一笔余额`
+- `之前按较高档位交，未来计划继续按更高档位交`
 
 ## Run
 
@@ -96,7 +105,7 @@ Typical prompts:
 - `可立即动用的现金有多少`
 - `LTI 年初 vs 现在`
 - `我什么时候可以不上班`
-- `如果我 46 岁不上班，退休时能领多少退休金`
+- `如果我在某个年龄不上班，退休时能领多少退休金`
 
 Workflow:
 
@@ -109,6 +118,61 @@ For retirement planning:
 1. Save or update `~/Desktop/持仓/profile.json`
 2. Keep `~/Desktop/持仓/总额.csv` and `~/Desktop/持仓/未来现金流.csv` updated
 3. Run `scripts/retirement_projection.py` or ask in chat
+
+## Retirement Countdown
+
+Typical prompts:
+
+- `距离退休还有多久？`
+- `退休倒计时版`
+- `什么时候可以不上班？`
+- `距离不上班还差多少钱，预计还需要多久？`
+- `做一个每年还差多少钱的倒计时表`
+
+CLI usage:
+
+```bash
+python3 scripts/retirement_projection.py
+python3 scripts/retirement_projection.py --stop-age TARGET_AGE
+python3 scripts/retirement_projection.py --current-total-assets-cny CURRENT_TOTAL_ASSETS
+```
+
+What the output includes:
+
+- `current_age_years`: your current age
+- `current_total_assets_cny`: the asset base used in the calculation
+- `bridge_assets_excluding_social_security_cny`: current assets excluding the social-security account used as future pension source
+- `earliest_no_work_projection`: the earliest stop-working age that still keeps assets above zero through the target lifespan
+- `scenario_table`: reference scenarios such as several stop-working ages and retirement age
+- `annual_pension_cny`: estimated annual pension at retirement
+- `projected_social_security_account_cny`: projected personal social-security account balance at retirement
+- `yearly_projection`: yearly gap and ending assets after stopping work
+
+Example summary in chat:
+
+```text
+最早大约在某个年龄可以不上班
+距离不上班还差一段资产缺口
+预计还需要若干年
+退休后每年需要动用一部分存款
+```
+
+Example CLI output shape:
+
+```json
+{
+  "current_date": "YYYY-MM-DD",
+  "current_age_years": 30.0,
+  "current_total_assets_cny": 3500000.0,
+  "bridge_assets_excluding_social_security_cny": 3200000.0,
+  "earliest_no_work_projection": {
+    "stop_age": 50,
+    "assets_at_stop_cny": 9000000.0,
+    "ending_assets_cny": 500000.0,
+    "annual_pension_cny": 150000.0
+  }
+}
+```
 
 ## Privacy
 
