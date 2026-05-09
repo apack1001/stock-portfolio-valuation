@@ -55,6 +55,11 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection
 ```bash
 python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection.py --stop-age 46
 ```
+- 如需精确到某个停工月份：
+```bash
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection.py --stop-month 2038-02
+```
+- 当用户问“精确到月”“倒计时到月”时，优先使用输出里的 `earliest_no_work_month_projection` 和 `nearby_month_scenarios`；年度口径 `earliest_no_work_projection` 只作为粗略参考。
 - 退休测算默认优先读取：
   - `总额.csv` 最新 `total_cny`
   - `未来现金流.csv`

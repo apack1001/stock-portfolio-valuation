@@ -111,6 +111,27 @@ def age_years(birth_ym: str, today: date) -> float:
     return months / 12
 
 
+def age_months(birth_ym: str, today: date) -> int:
+    birth = datetime.strptime(birth_ym + "-01", "%Y-%m-%d").date()
+    months = (today.year - birth.year) * 12 + (today.month - birth.month)
+    if today.day < birth.day:
+        months -= 1
+    return months
+
+
+def add_months(birth_ym: str, months: int) -> str:
+    birth = datetime.strptime(birth_ym + "-01", "%Y-%m-%d").date()
+    year = birth.year + (birth.month - 1 + months) // 12
+    month = (birth.month - 1 + months) % 12 + 1
+    return f"{year:04d}-{month:02d}"
+
+
+def format_age_months(months: int) -> str:
+    years = months // 12
+    rest_months = months % 12
+    return f"{years}岁{rest_months}个月"
+
+
 def annual_cashflow_for_year(rows, year: int) -> float:
     total = 0.0
     for row in rows:
@@ -223,6 +244,134 @@ def simulate_for_stop_age(profile: Profile, current_age: float, current_total_as
     }
 
 
+def monthly_cashflow_for_month(rows, year: int, month: int) -> float:
+    total = 0.0
+    current_key = year * 12 + month
+    for row in rows:
+        if (row.get("currency") or "CNY") != "CNY":
+            continue
+        start = row.get("start_date", "")
+        end = row.get("end_date", "")
+        freq = (row.get("frequency") or "").lower()
+        amount = float(row.get("amount") or 0)
+        if not start or not end:
+            continue
+        start_key = int(start[:4]) * 12 + int(start[5:7])
+        end_key = int(end[:4]) * 12 + int(end[5:7])
+        if not (start_key <= current_key <= end_key):
+            continue
+        if freq == "monthly":
+            total += amount
+        elif freq == "yearly" and month == int(start[5:7]):
+            total += amount
+    return total
+
+
+def simulate_for_stop_month(
+    profile: Profile,
+    current_age_months: int,
+    current_total_assets_cny: float,
+    stop_age_months: int,
+    cashflows,
+):
+    bridge_assets = current_total_assets_cny - profile.current_social_security_personal_account_cny
+    future_work_months = max(0, stop_age_months - current_age_months)
+    assets_at_stop = bridge_assets + future_work_months * (profile.annual_savings_cny / 12)
+    stop_age_years = stop_age_months / 12
+    pension = estimate_annual_pension(
+        profile, current_age_months / 12, stop_age_years
+    )
+    monthly_pension = pension["annual_pension_cny"] / 12
+
+    retirement_age_months = profile.retirement_age * 12
+    lifespan_age_months = profile.lifespan_age * 12
+    monthly_spending = profile.annual_spending_cny / 12
+
+    assets = assets_at_stop
+    monthly_rows = []
+    yearly_totals = {}
+    for age_m in range(stop_age_months, lifespan_age_months):
+        ym = add_months(profile.birth_year_month, age_m)
+        year = int(ym[:4])
+        month = int(ym[5:7])
+        extra_cashflow = monthly_cashflow_for_month(cashflows, year, month)
+        monthly_income = extra_cashflow
+        if age_m >= retirement_age_months:
+            monthly_income += monthly_pension
+        monthly_gap = monthly_spending - monthly_income
+        assets -= monthly_gap
+        yearly_totals.setdefault(year, {"year": year, "annual_gap_cny": 0.0, "ending_assets_cny": 0.0})
+        yearly_totals[year]["annual_gap_cny"] += monthly_gap
+        yearly_totals[year]["ending_assets_cny"] = assets
+        monthly_rows.append(
+            {
+                "month": ym,
+                "age": format_age_months(age_m),
+                "monthly_gap_cny": round(monthly_gap, 2),
+                "ending_assets_cny": round(assets, 2),
+            }
+        )
+
+    return {
+        "stop_month": add_months(profile.birth_year_month, stop_age_months),
+        "stop_age_months": stop_age_months,
+        "stop_age": format_age_months(stop_age_months),
+        "months_until_stop": max(0, stop_age_months - current_age_months),
+        "assets_at_stop_cny": round(assets_at_stop, 2),
+        "ending_assets_cny": round(assets, 2),
+        "annual_pension_cny": round(pension["annual_pension_cny"], 2),
+        "monthly_pension_cny": round(monthly_pension, 2),
+        "base_monthly_pension_cny": round(pension["base_monthly_pension_cny"], 2),
+        "personal_monthly_pension_cny": round(pension["personal_monthly_pension_cny"], 2),
+        "projected_social_security_account_cny": round(
+            pension["projected_social_security_account_cny"], 2
+        ),
+        "yearly_projection": [
+            {
+                "year": row["year"],
+                "annual_gap_cny": round(row["annual_gap_cny"], 2),
+                "ending_assets_cny": round(row["ending_assets_cny"], 2),
+            }
+            for row in yearly_totals.values()
+        ],
+        "monthly_projection_sample": monthly_rows[:12],
+    }
+
+
+def earliest_no_work_month(profile: Profile, current_age_months: int, current_total_assets_cny: float, cashflows):
+    result = None
+    for stop_month in range(current_age_months, profile.lifespan_age * 12 + 1):
+        projected = simulate_for_stop_month(
+            profile, current_age_months, current_total_assets_cny, stop_month, cashflows
+        )
+        if projected["ending_assets_cny"] >= 0:
+            result = projected
+            break
+    return result
+
+
+def nearby_month_scenarios(profile: Profile, current_age_months: int, current_total_assets_cny: float, cashflows, stop_age_months: int, window: int = 6):
+    rows = []
+    start = max(current_age_months, stop_age_months - window)
+    end = min(profile.lifespan_age * 12, stop_age_months + window)
+    for month in range(start, end + 1):
+        projected = simulate_for_stop_month(
+            profile, current_age_months, current_total_assets_cny, month, cashflows
+        )
+        rows.append(
+            {
+                "stop_month": projected["stop_month"],
+                "stop_age": projected["stop_age"],
+                "months_until_stop": projected["months_until_stop"],
+                "assets_at_stop_cny": projected["assets_at_stop_cny"],
+                "ending_assets_cny": projected["ending_assets_cny"],
+                "monthly_pension_cny": projected["monthly_pension_cny"],
+                "is_enough": projected["ending_assets_cny"] >= 0,
+            }
+        )
+    return rows
+
+
 def earliest_no_work_age(profile: Profile, current_age: float, current_total_assets_cny: float, cashflows):
     start_age = max(int(current_age), int(current_age) + (0 if current_age.is_integer() else 1))
     result = None
@@ -240,6 +389,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--current-total-assets-cny", type=float)
     parser.add_argument("--stop-age", type=int, help="simulate a specific stop-working age")
+    parser.add_argument("--stop-month", help="simulate a specific stop-working month as YYYY-MM")
     args = parser.parse_args()
 
     profile = load_profile()
@@ -258,11 +408,14 @@ def main():
         raise FileNotFoundError("总额.csv 缺失，且未提供 --current-total-assets-cny")
 
     current_age = age_years(profile.birth_year_month, today)
+    current_age_months = age_months(profile.birth_year_month, today)
     cashflows = load_cashflows()
 
     summary = {
         "current_date": today.isoformat(),
         "current_age_years": round(current_age, 2),
+        "current_age_months": current_age_months,
+        "current_age": format_age_months(current_age_months),
         "current_total_assets_cny": round(current_total_assets_cny, 2),
         "current_total_assets_source_date": current_total_assets_source_date,
         "bridge_assets_excluding_social_security_cny": round(
@@ -272,14 +425,34 @@ def main():
         "profile": profile.__dict__,
     }
 
-    if args.stop_age is not None:
+    if args.stop_month is not None:
+        birth = datetime.strptime(profile.birth_year_month + "-01", "%Y-%m-%d").date()
+        stop_date = datetime.strptime(args.stop_month + "-01", "%Y-%m-%d").date()
+        stop_age_months = (stop_date.year - birth.year) * 12 + (stop_date.month - birth.month)
+        projection = simulate_for_stop_month(
+            profile, current_age_months, current_total_assets_cny, stop_age_months, cashflows
+        )
+        summary["projection"] = projection
+    elif args.stop_age is not None:
         projection = simulate_for_stop_age(
             profile, current_age, current_total_assets_cny, args.stop_age, cashflows
         )
         summary["projection"] = projection
     else:
         earliest = earliest_no_work_age(profile, current_age, current_total_assets_cny, cashflows)
+        earliest_month = earliest_no_work_month(
+            profile, current_age_months, current_total_assets_cny, cashflows
+        )
         summary["earliest_no_work_projection"] = earliest
+        summary["earliest_no_work_month_projection"] = earliest_month
+        if earliest_month is not None:
+            summary["nearby_month_scenarios"] = nearby_month_scenarios(
+                profile,
+                current_age_months,
+                current_total_assets_cny,
+                cashflows,
+                earliest_month["stop_age_months"],
+            )
         summary["scenario_table"] = [
             simulate_for_stop_age(profile, current_age, current_total_assets_cny, age, cashflows)
             for age in sorted({46, 48, 50, 55, 58, 60, profile.retirement_age})

@@ -140,6 +140,7 @@ CLI usage:
 ```bash
 python3 scripts/retirement_projection.py
 python3 scripts/retirement_projection.py --stop-age TARGET_AGE
+python3 scripts/retirement_projection.py --stop-month YYYY-MM
 python3 scripts/retirement_projection.py --current-total-assets-cny CURRENT_TOTAL_ASSETS
 ```
 
@@ -149,8 +150,11 @@ What the output includes:
 - `current_total_assets_cny`: the asset base used in the calculation
 - `bridge_assets_excluding_social_security_cny`: current assets excluding the social-security account used as future pension source
 - `earliest_no_work_projection`: the earliest stop-working age that still keeps assets above zero through the target lifespan
+- `earliest_no_work_month_projection`: the earliest stop-working month using monthly cash-flow simulation
+- `nearby_month_scenarios`: boundary months around the earliest feasible month
 - `scenario_table`: reference scenarios such as several stop-working ages and retirement age
 - `annual_pension_cny`: estimated annual pension at retirement
+- `monthly_pension_cny`: estimated monthly pension at retirement
 - `projected_social_security_account_cny`: projected personal social-security account balance at retirement
 - `yearly_projection`: yearly gap and ending assets after stopping work
 
@@ -176,6 +180,14 @@ Example CLI output shape:
     "assets_at_stop_cny": 9000000.0,
     "ending_assets_cny": 500000.0,
     "annual_pension_cny": 150000.0
+  },
+  "earliest_no_work_month_projection": {
+    "stop_month": "YYYY-MM",
+    "stop_age": "50岁0个月",
+    "months_until_stop": 120,
+    "assets_at_stop_cny": 9000000.0,
+    "ending_assets_cny": 500000.0,
+    "monthly_pension_cny": 12500.0
   }
 }
 ```
