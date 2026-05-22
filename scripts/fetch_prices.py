@@ -14,6 +14,7 @@ def parse_tax_rate(note: str):
     m = re.search(r'税率\s*(\d+(?:\.\d+)?)\s*%', note or "")
     return float(m.group(1)) / 100 if m else None
 CSV_PATH = Path.home() / "Desktop/持仓/明细.csv"
+TOTAL_PATH = Path.home() / "Desktop/持仓/总额.csv"
 _FUND_ESTIMATION_CACHE = None
 _GOLD_PRICE_CACHE = None
 _KGI_FUND_CACHE = {}
@@ -200,6 +201,37 @@ def fetch_kgi_fund_nav(code: str, currency: str):
 
     _KGI_FUND_CACHE[cache_key] = None
     return None
+def fetch_stockevents_fund_price(code: str, currency: str):
+    """KGI 不覆盖时，尝试从 Stock Events 的 FUND 页面提取境外基金报价。"""
+    code = str(code or "").strip().upper()
+    currency = str(currency or "").strip().upper()
+    if not code or currency not in ("USD", "HKD"):
+        return None
+
+    import requests
+
+    url = f"https://stockevents.app/en/stock/{code}.FUND"
+    try:
+        resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+        if resp.status_code != 200:
+            return None
+        symbol = "HK\\$" if currency == "HKD" else "\\$"
+        match = re.search(rf"{symbol}([0-9]+(?:\\.[0-9]+)?)", resp.text)
+        if not match:
+            return None
+        price = to_float(match.group(1))
+        if price is None:
+            return None
+        updated_at = datetime.now().strftime("%Y-%m-%d")
+        return {
+            "price": price,
+            "nav_date": updated_at,
+            "fund_source": "stockevents_fund",
+            "updated_at": updated_at,
+            "url": url,
+        }
+    except Exception:
+        return None
 def price_cny_fund(row, fund_mode: str):
     """人民币公募基金：有 code + shares 时自动估值；失败则回退 CSV 快照。"""
     code = str(row.get("code", "")).strip()
@@ -249,6 +281,8 @@ def price_offshore_fund(row):
 
     priced = fetch_kgi_fund_nav(code, row.get("currency", ""))
     if not priced:
+        priced = fetch_stockevents_fund_price(code, row.get("currency", ""))
+    if not priced:
         return None
 
     return {
@@ -261,8 +295,7 @@ def price_offshore_fund(row):
     }
 def price_gold_gram_asset(row):
     """黄金克数持仓：shares 按克，市值 = SGE Au99.99 价格 * 克数。"""
-    note = row.get("note", "")
-    if "黄金克数" not in note:
+    if not is_gold_gram_asset(row):
         return None
     grams = to_float(row.get("shares", ""))
     if grams is None:
@@ -277,6 +310,14 @@ def price_gold_gram_asset(row):
         "fund_source": source,
         "updated_at": updated_at,
     }
+def is_gold_gram_asset(row):
+    """识别按黄金克数记账的基金行，避免刷新备注后丢失识别口径。"""
+    note = row.get("note", "")
+    if "黄金克数" in note:
+        return True
+    code = str(row.get("code", "")).strip()
+    cost_price = to_float(row.get("cost_price", ""))
+    return code == "002621" and cost_price is not None and cost_price > 100
 def load_csv():
     if not CSV_PATH.exists():
         return None
@@ -286,6 +327,143 @@ def load_csv():
         for row in reader:
             rows.append({k: v.strip() for k, v in row.items()})
     return rows
+def format_money(value):
+    if value is None:
+        return ""
+    return f"{float(value):.2f}"
+def build_fund_note(result):
+    """生成可追溯的基金估值备注，不改动持仓份额/成本。"""
+    source = result.get("fund_source", "")
+    price = result.get("price")
+    currency = result.get("currency", "")
+    updated_at = result.get("nav_date") or result.get("updated_at", "")
+    if price is None:
+        return result.get("note", "")
+    if source == "kgi_nav":
+        return f"NAV {price} {currency}（KGI，价格日期{updated_at}）"
+    if source == "stockevents_fund":
+        return f"NAV {price} {currency}（Stock Events，获取日期{updated_at}）"
+    if source == "estimate":
+        pct = result.get("estimated_pct", "")
+        pct_text = f"，估算涨跌{pct}" if pct else ""
+        return f"盘中估算净值 {price} {currency}（东方财富，{updated_at}{pct_text}）"
+    if source == "official_nav":
+        return f"NAV {price} {currency}（公布净值，价格日期{updated_at}）"
+    if source in ("gold_sge_realtime", "gold_sge_close"):
+        return f"黄金克数；Au99.99 {price} CNY/克（{source}，{updated_at}）"
+    return result.get("note", "")
+def write_back_funds(rows, results):
+    """把本次成功取到的基金估值写回 CSV，供下次默认读取。"""
+    result_by_key = {
+        (r.get("account"), r.get("name"), r.get("code")): r
+        for r in results
+        if r.get("category") == "基金"
+    }
+    changed = 0
+    for row in rows:
+        if row.get("category") != "基金":
+            continue
+        key = (row.get("account"), row.get("name"), row.get("code"))
+        result = result_by_key.get(key)
+        if not result or result.get("market_value") is None:
+            continue
+        if result.get("fund_source") == "snapshot":
+            continue
+        row["last_market_value"] = format_money(result.get("market_value"))
+        row["last_pnl"] = format_money(result.get("pnl"))
+        row["last_updated"] = result.get("nav_date") or result.get("updated_at") or row.get("last_updated", "")
+        note = build_fund_note(result)
+        if note:
+            row["note"] = note
+        changed += 1
+    if changed:
+        fieldnames = [
+            "account", "category", "name", "code", "market", "currency",
+            "shares", "cost_price", "cost_total", "last_market_value",
+            "last_pnl", "last_updated", "note",
+        ]
+        with open(CSV_PATH, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+    return changed
+def get_fx_rates():
+    """获取 USD/CNY 与 HKD/CNY；用于日历史落盘。"""
+    try:
+        import akshare as ak
+        import math
+
+        df = ak.fx_spot_quote()
+        usd_row = df[df["货币对"] == "USD/CNY"][["买报价", "卖报价"]].iloc[0]
+        hkd_row = df[df["货币对"] == "HKD/CNY"][["买报价", "卖报价"]].iloc[0]
+        usd_cny = (float(usd_row["买报价"]) + float(usd_row["卖报价"])) / 2
+        hkd_cny = (float(hkd_row["买报价"]) + float(hkd_row["卖报价"])) / 2
+        if math.isnan(usd_cny) or math.isnan(hkd_cny):
+            raise ValueError("NaN from akshare")
+        return usd_cny, hkd_cny
+    except Exception:
+        import requests
+
+        resp = requests.get("https://open.er-api.com/v6/latest/USD", timeout=8)
+        rates = resp.json()["rates"]
+        usd_cny = float(rates["CNY"])
+        hkd_cny = usd_cny / float(rates["HKD"])
+        return usd_cny, hkd_cny
+def summarize_totals(results, usd_cny, hkd_cny):
+    """生成与 ~/Desktop/持仓/总额.csv 兼容的日汇总。"""
+    usd_mv = hkd_mv = cny_mv = 0.0
+    pnl_cny_excl_lti = 0.0
+    for item in results:
+        market_value = to_float(item.get("market_value")) or 0.0
+        pnl = to_float(item.get("pnl")) or 0.0
+        currency = item.get("currency", "")
+        if currency == "USD":
+            usd_mv += market_value
+            pnl_cny = pnl * usd_cny
+        elif currency == "HKD":
+            hkd_mv += market_value
+            pnl_cny = pnl * hkd_cny
+        else:
+            cny_mv += market_value
+            pnl_cny = pnl
+
+        if item.get("account") != "LTI":
+            pnl_cny_excl_lti += pnl_cny
+
+    total_cny = usd_mv * usd_cny + hkd_mv * hkd_cny + cny_mv
+    return {
+        "date": datetime.now().strftime("%Y-%m-%d"),
+        "total_usd": total_cny / usd_cny if usd_cny else 0.0,
+        "total_cny": total_cny,
+        "usd_mv": usd_mv,
+        "hkd_mv": hkd_mv,
+        "cny_mv": cny_mv,
+        "usd_cny_rate": usd_cny,
+        "hkd_cny_rate": hkd_cny,
+        "pnl_usd_excl_lti": pnl_cny_excl_lti / usd_cny if usd_cny else 0.0,
+        "pnl_cny_excl_lti": pnl_cny_excl_lti,
+    }
+def upsert_total_history(results):
+    """按日期覆盖写入总额.csv，避免同一天重复追加。"""
+    usd_cny, hkd_cny = get_fx_rates()
+    summary = summarize_totals(results, usd_cny, hkd_cny)
+    fieldnames = [
+        "date", "total_usd", "total_cny", "usd_mv", "hkd_mv", "cny_mv",
+        "usd_cny_rate", "hkd_cny_rate", "pnl_usd_excl_lti", "pnl_cny_excl_lti",
+    ]
+    rows = []
+    if TOTAL_PATH.exists():
+        with open(TOTAL_PATH, "r", encoding="utf-8-sig") as f:
+            rows = list(csv.DictReader(f))
+    rows = [row for row in rows if row.get("date") != summary["date"]]
+    rows.append({key: format_money(summary[key]) if key != "date" else summary[key] for key in fieldnames})
+    rows.sort(key=lambda row: row["date"])
+    TOTAL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(TOTAL_PATH, "w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+    return summary
 def process(rows, fund_mode="official"):
     results = []
     for row in rows:
@@ -356,7 +534,7 @@ def process(rows, fund_mode="official"):
                     "error": str(e),
                 })
         # 黄金克数持仓：按实时/最近 Au99.99 金价估值
-        elif market == "FUND_CNY" and "黄金克数" in row.get("note", ""):
+        elif market == "FUND_CNY" and is_gold_gram_asset(row):
             cost = float(cost_total_s) if cost_total_s else 0
             try:
                 priced = price_gold_gram_asset(row)
@@ -498,6 +676,16 @@ if __name__ == "__main__":
         default="estimate",
         help="estimate=盘中估算净值优先，失败回退正式净值/快照; official=最新公布净值",
     )
+    parser.add_argument(
+        "--write-back-funds",
+        action="store_true",
+        help="将本次成功获取到的基金估值写回 ~/Desktop/持仓/明细.csv",
+    )
+    parser.add_argument(
+        "--no-write-history",
+        action="store_true",
+        help="不将本次总资产汇总写入 ~/Desktop/持仓/总额.csv",
+    )
     args = parser.parse_args()
     try:
         import akshare
@@ -513,4 +701,14 @@ if __name__ == "__main__":
         }, ensure_ascii=False))
         sys.exit(1)
     results = process(rows, fund_mode=args.fund_mode)
-    print(json.dumps(results, ensure_ascii=False, indent=2))
+    history_summary = None if args.no_write_history else upsert_total_history(results)
+    if args.write_back_funds:
+        changed = write_back_funds(rows, results)
+        payload = {
+            "write_back_funds_changed": changed,
+            "history_upserted": history_summary,
+            "results": results,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+    else:
+        print(json.dumps(results, ensure_ascii=False, indent=2))

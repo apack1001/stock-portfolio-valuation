@@ -7,9 +7,10 @@ description: 从持仓CSV或本地截图读取持仓数据，支持首次初始�
 持仓数据的**唯一可信来源**是 `~/Desktop/持仓/明细.csv`。
 - 未来收入/支出计划记录在 `~/Desktop/持仓/未来现金流.csv`，例如年金保险领取、保费支出、未来确定性款项；这类现金流**不计入当前持仓市值**，只在退休/长期现金流测算中使用
 - 退休测算画像记录在 `~/Desktop/持仓/profile.json`，例如出生年月、工作年限、每年支出、每年可新增储蓄、社保相关参数
+- 交易纪律记录在 `~/Desktop/持仓/交易纪律.json`，例如减仓优先级、触发价位、每档卖出股数和风险规则；该文件只记录策略，不代表已执行交易
 - **非必要不从图片重新导入**：CSV 存在则直接加载
 - **每次买入/卖出/基金变动后立即更新 CSV**，再生成报告
-- 基金市值建议每周从 App 截图更新一次
+- 基金市值优先用脚本刷新最新净值；截图只作为自动源失败时的补录来源
 ---
 ## 执行步骤
 ### Step 1：确定数据来源
@@ -77,6 +78,16 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection
 | 基金份额/成本更新 | 更新 shares、cost_price，重新计算 cost_total = shares × cost_price；同步修正 last_pnl = last_market_value - cost_total |
 | 新增未行权期权 | 新增一行（market=US，category=股票），cost_price 填行权价，在 note 字段写 `税率X%`（如 `税率20%`），脚本自动按税后内在价值计算市值 |
 ---
+### Step 2.5：读取交易纪律（若用户问“交易纪律/减仓策略/哪些该卖”）
+- 优先读取 `~/Desktop/持仓/交易纪律.json`
+- 将纪律与当前持仓、最新价格结合，输出：
+  - 当前是否触发减仓
+  - 下一档触发价
+  - 触发后卖出股数
+  - 不应继续加仓的标的
+  - LTI 与普通股重复暴露的风险
+- 若用户确认“已卖出/已买入”，再按 Step 2 更新 `明细.csv`；仅记录纪律时不要改动真实持仓明细
+---
 ### Step 3：运行估值脚本 + 获取汇率
 ```bash
 python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py
@@ -85,7 +96,13 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py
 - 读取 CSV
 - 对 `market=US/HK/CN` 的股票实时获取最新价格（akshare）
 - 对 `FUND_CNY` 且有 `code + shares` 的基金，默认优先使用**盘中估算净值**；失败时回退正式净值/CSV 快照
-- 对 `market=FUND_USD/FUND_HKD` 的基金，当前仍以 CSV 存储的 `last_market_value` 为主
+- 对 `market=FUND_USD/FUND_HKD` 的基金，优先尝试 KGI 最新净值；KGI 不覆盖时尝试 Stock Events 的 `.FUND` 页面；仍失败时回退 CSV 快照
+- 默认将本次总资产汇总按日期 upsert 到 `~/Desktop/持仓/总额.csv`，同一天重复执行会覆盖当天记录，不会重复追加；如只想调试输出可加 `--no-write-history`
+- 当用户要求“基金全部更新/刷新基金净值/下次也用最新值”时，运行：
+```bash
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py --fund-mode estimate --write-back-funds
+```
+  该命令会把成功获取到的基金 `last_market_value`、`last_pnl`、`last_updated` 和净值来源写回 `~/Desktop/持仓/明细.csv`；未获取成功的基金保留原快照
 - **若 note 中含 `税率X%`**（未行权期权），按税后内在价值计算市值：
   `market_value = max(0, 现价 - 行权价) × 持仓数 × (1 - 税率)`
   价外时（现价 ≤ 行权价）市值自动为 0；输出中额外包含 `tax_rate` 和 `intrinsic_gross`（税前内在价值）供参考
@@ -209,8 +226,24 @@ usd_cny, hkd_cny, usd_hkd = get_fx_rates()
 > 投资资产口径用于看组合表现；LTI 口径用于看激励资产；可立即动用现金用于看现金安全垫；应收/限制类资产用于看低波动但流动性较弱的资产；总身家口径用于看完整资产规模。
 > 年金保险等未来现金流不进入上述当前资产口径，但在退休测算中作为未来收入/支出项处理；负数现金流应作为生活费之外的独立开销。
 ---
+### Step 4.5：持仓报告自动追加退休倒计时
+当用户询问 `持仓`、`持仓总值`、`持仓分析`、`持仓明细`、`估值`、`完整版持仓估值报告` 等资产估值类问题时，完成 Step 3/4 后一并运行退休测算：
+```bash
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection.py --current-total-assets-cny {本次估值总资产CNY}
+```
+- 使用本次刚算出的总资产作为 `--current-total-assets-cny`，不要只依赖 `总额.csv` 的旧值
+- 若 `profile.json` 缺失必要字段，提示用户补充出生年月、已工作年限、每年支出、每年可攒金额；不要阻塞持仓报告本身
+- 报告末尾追加简短「退休倒计时」摘要：
+  - 当前年龄
+  - 最早可不上班月份/年龄
+  - 距离不上班还需多久
+  - 到停工时预计资产
+  - 退休后预计月养老金
+  - 79岁或 profile 中目标寿命时的结余
+- 用户只问单项资产、单只股票、单只基金时，不需要自动追加退休倒计时
+---
 ### Step 5：保存日历史 + 对比昨日
-每次生成报告后，将当日汇总数据 **upsert** 到 `~/Desktop/持仓/总额.csv`（按 date 去重，同一天覆盖）：
+`fetch_prices.py` 默认会将当日汇总数据 **upsert** 到 `~/Desktop/持仓/总额.csv`（按 date 去重，同一天覆盖）：
 | 字段 | 说明 |
 |------|------|
 | date | YYYY-MM-DD |

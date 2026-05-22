@@ -91,13 +91,16 @@ python3 scripts/retirement_projection.py
 python3 scripts/retirement_projection.py --stop-age 46
 python3 scripts/fetch_prices.py
 python3 scripts/fetch_prices.py --fund-mode official
+python3 scripts/fetch_prices.py --fund-mode estimate --write-back-funds
 ```
 
 Notes:
 
 - `FUND_CNY` funds prefer intraday estimated NAV, then fall back to official NAV.
-- `FUND_HKD` and `FUND_USD` funds now try to fetch latest NAV from KGI fund-detail pages first.
+- `FUND_HKD` and `FUND_USD` funds now try to fetch latest NAV from KGI fund-detail pages first, then Stock Events `.FUND` pages.
 - If an offshore fund cannot be resolved from the online source, the skill falls back to the local snapshot stored in `明细.csv`.
+- Use `--write-back-funds` when you want successful fund refreshes saved back into `~/Desktop/持仓/明细.csv` for future runs.
+- Each valuation run writes or replaces the same-day row in `~/Desktop/持仓/总额.csv`; use `--no-write-history` for dry debug runs.
 
 ## Use
 
@@ -117,13 +120,21 @@ Workflow:
 
 1. Initialize from natural language or screenshots, or update `~/Desktop/持仓/明细.csv`
 2. Run the script or ask for valuation in chat
-3. Review holdings, P&L, cash, and LTI summaries
+3. Review holdings, P&L, cash, LTI summaries, and the appended retirement countdown
 
 For retirement planning:
 
 1. Save or update `~/Desktop/持仓/profile.json`
 2. Keep `~/Desktop/持仓/总额.csv` and `~/Desktop/持仓/未来现金流.csv` updated
 3. Run `scripts/retirement_projection.py` or ask in chat
+
+When the prompt is a broad portfolio request such as `持仓`, `持仓总值`, `持仓分析`, or `完整持仓估值报告`, the skill should also run:
+
+```bash
+python3 scripts/retirement_projection.py --current-total-assets-cny CURRENT_TOTAL_ASSETS
+```
+
+This appends a short retirement countdown based on the freshly calculated portfolio total instead of an older `总额.csv` snapshot.
 
 ## Retirement Countdown
 
