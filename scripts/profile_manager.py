@@ -26,6 +26,7 @@ DEFAULT_PROFILE = {
     "historical_contribution_multiple": None,
     "future_contribution_multiple": None,
     "beijing_average_monthly_salary_cny_today": 12000,
+    "personal_account_interest_rate": 0.03,
 }
 
 
@@ -59,6 +60,7 @@ def main():
     parser.add_argument("--historical-contribution-multiple", type=float)
     parser.add_argument("--future-contribution-multiple", type=float)
     parser.add_argument("--beijing-average-monthly-salary-cny-today", type=float)
+    parser.add_argument("--personal-account-interest-rate", type=float, help="个人账户记账利率（小数，如 0.03）")
     args = parser.parse_args()
 
     profile = load_profile()
@@ -74,6 +76,7 @@ def main():
         "historical_contribution_multiple": args.historical_contribution_multiple,
         "future_contribution_multiple": args.future_contribution_multiple,
         "beijing_average_monthly_salary_cny_today": args.beijing_average_monthly_salary_cny_today,
+        "personal_account_interest_rate": args.personal_account_interest_rate,
     }
     changed = False
     for key, value in updates.items():

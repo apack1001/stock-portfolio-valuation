@@ -443,6 +443,89 @@ def summarize_totals(results, usd_cny, hkd_cny):
         "pnl_usd_excl_lti": pnl_cny_excl_lti / usd_cny if usd_cny else 0.0,
         "pnl_cny_excl_lti": pnl_cny_excl_lti,
     }
+def classify_bucket(item):
+    """把单条持仓归入五大口径之一：lti / cash / restricted / invest / other。"""
+    account = item.get("account", "")
+    category = item.get("category", "")
+    note = item.get("note", "") or ""
+    if account == "LTI":
+        return "lti"
+    if category in ("活期", "存款"):
+        return "cash"
+    if category in ("应收款", "社保"):
+        return "restricted"
+    if category == "加密货币" and ("类现金" in note or "稳定币" in note):
+        return "cash"
+    if category == "基金" and ("货币基金" in note or "类现金" in note):
+        return "cash"
+    if category in ("股票", "基金", "加密货币"):
+        return "invest"
+    return "other"
+
+
+def summarize_buckets(results, usd_cny, hkd_cny):
+    """生成投资/LTI/现金/应收限制四口径的分币种与折算CNY汇总。"""
+    def rate(currency):
+        return usd_cny if currency == "USD" else hkd_cny if currency == "HKD" else 1.0
+
+    raw = {}
+    for item in results:
+        bucket = classify_bucket(item)
+        currency = item.get("currency", "CNY")
+        cell = raw.setdefault(bucket, {}).setdefault(currency, {"mv": 0.0, "pnl": 0.0, "cost": 0.0})
+        cell["mv"] += to_float(item.get("market_value")) or 0.0
+        cell["pnl"] += to_float(item.get("pnl")) or 0.0
+        cell["cost"] += to_float(item.get("cost_total")) or 0.0
+
+    out = {}
+    for bucket, by_currency in raw.items():
+        total = {"mv_cny": 0.0, "pnl_cny": 0.0, "cost_cny": 0.0}
+        for currency, cell in by_currency.items():
+            total["mv_cny"] += cell["mv"] * rate(currency)
+            total["pnl_cny"] += cell["pnl"] * rate(currency)
+            total["cost_cny"] += cell["cost"] * rate(currency)
+        total["ret_pct"] = (
+            total["pnl_cny"] / total["cost_cny"] * 100 if total["cost_cny"] else None
+        )
+        if bucket == "lti":
+            # LTI 一律不计盈亏，仅统计市值
+            total["pnl_cny"] = None
+            total["cost_cny"] = None
+            total["ret_pct"] = None
+        out[bucket] = {"by_currency": by_currency, "total_cny": total}
+
+    grand_cny = sum(out[b]["total_cny"]["mv_cny"] for b in out)
+    return {
+        "buckets": out,
+        "grand_total_cny": grand_cny,
+        "grand_total_usd": grand_cny / usd_cny if usd_cny else 0.0,
+    }
+
+
+def yesterday_compare(today_total_cny, today_total_usd):
+    """读取总额.csv 取上一交易日，返回与今日的对比。"""
+    if not TOTAL_PATH.exists():
+        return None
+    with open(TOTAL_PATH, "r", encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    today = datetime.now().strftime("%Y-%m-%d")
+    prior = [r for r in rows if r.get("date") != today]
+    if not prior:
+        return None
+    last = prior[-1]
+    prev_cny = to_float(last.get("total_cny")) or 0.0
+    delta = today_total_cny - prev_cny
+    return {
+        "yesterday_date": last.get("date"),
+        "yesterday_cny": prev_cny,
+        "yesterday_usd": to_float(last.get("total_usd")) or 0.0,
+        "today_cny": today_total_cny,
+        "today_usd": today_total_usd,
+        "delta_cny": delta,
+        "delta_pct": (delta / prev_cny * 100) if prev_cny else None,
+    }
+
+
 def upsert_total_history(results):
     """按日期覆盖写入总额.csv，避免同一天重复追加。"""
     usd_cny, hkd_cny = get_fx_rates()
@@ -686,6 +769,11 @@ if __name__ == "__main__":
         action="store_true",
         help="不将本次总资产汇总写入 ~/Desktop/持仓/总额.csv",
     )
+    parser.add_argument(
+        "--report",
+        action="store_true",
+        help="输出报告所需的一揽子结构：fx 汇率 + 五口径汇总 + 昨日对比 + 明细，免去内联聚合代码",
+    )
     args = parser.parse_args()
     try:
         import akshare
@@ -702,6 +790,28 @@ if __name__ == "__main__":
         sys.exit(1)
     results = process(rows, fund_mode=args.fund_mode)
     history_summary = None if args.no_write_history else upsert_total_history(results)
+    if args.report:
+        if history_summary is not None:
+            usd_cny = history_summary["usd_cny_rate"]
+            hkd_cny = history_summary["hkd_cny_rate"]
+        else:
+            usd_cny, hkd_cny = get_fx_rates()
+        totals = history_summary or summarize_totals(results, usd_cny, hkd_cny)
+        buckets = summarize_buckets(results, usd_cny, hkd_cny)
+        payload = {
+            "fx": {
+                "usd_cny": usd_cny,
+                "hkd_cny": hkd_cny,
+                "usd_hkd": usd_cny / hkd_cny if hkd_cny else None,
+                "date": datetime.now().strftime("%Y-%m-%d"),
+            },
+            "summary": buckets,
+            "totals": totals,
+            "compare": yesterday_compare(totals["total_cny"], totals["total_usd"]),
+            "results": results,
+        }
+        print(json.dumps(payload, ensure_ascii=False, indent=2))
+        sys.exit(0)
     if args.write_back_funds:
         changed = write_back_funds(rows, results)
         payload = {

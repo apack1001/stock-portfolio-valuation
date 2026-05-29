@@ -9,6 +9,8 @@ It also supports retirement-planning prompts such as `我什么时候可以不�
 
 - `SKILL.md`: skill instructions and workflow
 - `scripts/fetch_prices.py`: fetches prices and computes valuation JSON
+- `scripts/archive_reports.py`: archives calculation outputs into the local desktop portfolio folder
+- `scripts/hk_ipo_ytd.py`: fetches HK IPO year-to-date performance and calculates one-lot returns
 
 ## Init
 
@@ -92,6 +94,8 @@ python3 scripts/retirement_projection.py --stop-age 46
 python3 scripts/fetch_prices.py
 python3 scripts/fetch_prices.py --fund-mode official
 python3 scripts/fetch_prices.py --fund-mode estimate --write-back-funds
+python3 scripts/archive_reports.py --from-tmp
+python3 scripts/hk_ipo_ytd.py --year 2026
 ```
 
 Notes:
@@ -101,6 +105,8 @@ Notes:
 - If an offshore fund cannot be resolved from the online source, the skill falls back to the local snapshot stored in `明细.csv`.
 - Use `--write-back-funds` when you want successful fund refreshes saved back into `~/Desktop/持仓/明细.csv` for future runs.
 - Each valuation run writes or replaces the same-day row in `~/Desktop/持仓/总额.csv`; use `--no-write-history` for dry debug runs.
+- Use `scripts/archive_reports.py` to persist temporary valuation, retirement, or IPO outputs under `~/Desktop/持仓/测算归档`.
+- Use `scripts/hk_ipo_ytd.py` for HK IPO one-lot first-day returns, hold-to-now returns, win/loss counts, and "稳中一手" follow-up analysis.
 
 ## Use
 
@@ -113,6 +119,8 @@ Typical prompts:
 - `累计盈亏`
 - `可立即动用的现金有多少`
 - `LTI 年初 vs 现在`
+- `今年港股打新清单`
+- `港股打新全中一手收益`
 - `我什么时候可以不上班`
 - `如果我在某个年龄不上班，退休时能领多少退休金`
 
@@ -135,6 +143,41 @@ python3 scripts/retirement_projection.py --current-total-assets-cny CURRENT_TOTA
 ```
 
 This appends a short retirement countdown based on the freshly calculated portfolio total instead of an older `总额.csv` snapshot.
+
+## Calculation Archives
+
+Persist temporary outputs into the local portfolio folder:
+
+```bash
+python3 scripts/archive_reports.py --from-tmp
+python3 scripts/archive_reports.py --valuation-json /path/to/valuation.json
+python3 scripts/archive_reports.py --retirement-json /path/to/retirement.json
+python3 scripts/archive_reports.py --ipo-csv /path/to/hk_ipo.csv
+```
+
+Archive root:
+
+```text
+~/Desktop/持仓/测算归档
+```
+
+Files are grouped into `估值快照`, `退休测算`, and `港股IPO`.
+
+## HK IPO Analysis
+
+Fetch the current year's listed HK IPO table and calculate one-lot returns:
+
+```bash
+python3 scripts/hk_ipo_ytd.py --year 2026
+```
+
+The script writes:
+
+```text
+~/Desktop/持仓/测算归档/港股IPO/hk_ipo_ytd.csv
+```
+
+It includes listing date, ticker, one-lot size, listing price, first-day return, estimated first-day close, one-lot first-day P&L, latest price, one-lot current P&L, and current return.
 
 ## Retirement Countdown
 

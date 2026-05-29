@@ -43,6 +43,7 @@ class Profile:
     historical_contribution_multiple: float | None = None
     future_contribution_multiple: float | None = None
     beijing_average_monthly_salary_cny_today: float = 12000.0
+    personal_account_interest_rate: float = 0.03
 
 
 def load_json(path: Path):
@@ -79,6 +80,11 @@ def load_profile() -> Profile:
         ),
         beijing_average_monthly_salary_cny_today=float(
             data.get("beijing_average_monthly_salary_cny_today") or 12000
+        ),
+        personal_account_interest_rate=(
+            float(data["personal_account_interest_rate"])
+            if data.get("personal_account_interest_rate") not in (None, "")
+            else 0.03
         ),
     )
 
@@ -154,6 +160,8 @@ def estimate_annual_pension(profile: Profile, current_age: float, stop_age: int)
     future_work_years = max(0.0, stop_age - current_age)
     current_ss = profile.current_social_security_personal_account_cny
 
+    r = profile.personal_account_interest_rate or 0.0
+
     annual_account_contrib = 0.0
     projected_account = current_ss
     if (
@@ -165,7 +173,22 @@ def estimate_annual_pension(profile: Profile, current_age: float, stop_age: int)
         annual_account_contrib = (
             current_ss / profile.years_worked
         ) * (profile.future_contribution_multiple / profile.historical_contribution_multiple)
-        projected_account = current_ss + annual_account_contrib * future_work_years
+        if r > 0:
+            # 个人账户记账利率：本金与每年缴费均按复利滚存至领取年龄（retirement_age）
+            years_to_retire = max(0.0, profile.retirement_age - current_age)
+            gap_years = max(0.0, profile.retirement_age - stop_age)  # 停缴 -> 领取的空窗期
+            balance_at_retire = current_ss * (1 + r) ** years_to_retire
+            if future_work_years > 0:
+                fv_contrib_at_stop = (
+                    annual_account_contrib * ((1 + r) ** future_work_years - 1) / r
+                )
+            else:
+                fv_contrib_at_stop = 0.0
+            fv_contrib_at_retire = fv_contrib_at_stop * (1 + r) ** gap_years
+            projected_account = balance_at_retire + fv_contrib_at_retire
+        else:
+            # 利率为 0 时退化为线性累加（旧口径）
+            projected_account = current_ss + annual_account_contrib * future_work_years
 
     total_years = profile.years_worked + future_work_years
     if total_years <= 0:
@@ -390,9 +413,16 @@ def main():
     parser.add_argument("--current-total-assets-cny", type=float)
     parser.add_argument("--stop-age", type=int, help="simulate a specific stop-working age")
     parser.add_argument("--stop-month", help="simulate a specific stop-working month as YYYY-MM")
+    parser.add_argument(
+        "--interest-rate",
+        type=float,
+        help="个人账户记账利率（小数，如 0.03）；覆盖 profile.json 中的值，传 0 退回线性口径",
+    )
     args = parser.parse_args()
 
     profile = load_profile()
+    if args.interest_rate is not None:
+        profile.personal_account_interest_rate = args.interest_rate
     today = date.today()
     total_snapshot = latest_total_assets_cny()
     if args.current_total_assets_cny is not None:

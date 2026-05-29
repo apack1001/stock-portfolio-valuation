@@ -8,6 +8,7 @@ description: 从持仓CSV或本地截图读取持仓数据，支持首次初始�
 - 未来收入/支出计划记录在 `~/Desktop/持仓/未来现金流.csv`，例如年金保险领取、保费支出、未来确定性款项；这类现金流**不计入当前持仓市值**，只在退休/长期现金流测算中使用
 - 退休测算画像记录在 `~/Desktop/持仓/profile.json`，例如出生年月、工作年限、每年支出、每年可新增储蓄、社保相关参数
 - 交易纪律记录在 `~/Desktop/持仓/交易纪律.json`，例如减仓优先级、触发价位、每档卖出股数和风险规则；该文件只记录策略，不代表已执行交易
+- 测算归档保存在 `~/Desktop/持仓/测算归档/`，用于保存估值快照、退休测算、港股IPO清单等历史测算结果，避免只落在 `/tmp`
 - **非必要不从图片重新导入**：CSV 存在则直接加载
 - **每次买入/卖出/基金变动后立即更新 CSV**，再生成报告
 - 基金市值优先用脚本刷新最新净值；截图只作为自动源失败时的补录来源
@@ -89,6 +90,21 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection
 - 若用户确认“已卖出/已买入”，再按 Step 2 更新 `明细.csv`；仅记录纪律时不要改动真实持仓明细
 ---
 ### Step 3：运行估值脚本 + 获取汇率
+
+**持仓分析/估值报告：优先用 `--report`，一条命令拿到全部所需数据，避免手写内联聚合代码：**
+```bash
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py --report
+```
+`--report` 直接返回报告所需的全部结构，**不要再手写任何 FX 获取或分类汇总的 Python**：
+- `fx`：`usd_cny` / `hkd_cny` / `usd_hkd` / `date`（含 akshare→er-api fallback）
+- `summary.buckets`：四口径已折算汇总（`invest` / `lti` / `cash` / `restricted`），每个含 `by_currency`（分币种 mv/pnl/cost）与 `total_cny`（`mv_cny` / `pnl_cny` / `cost_cny` / `ret_pct`）；LTI 的 pnl/cost/ret 已按规则置 null（只看市值）
+- `summary.grand_total_cny` / `grand_total_usd`：总身家
+- `compare`：昨日 vs 今日（`yesterday_cny` / `today_cny` / `delta_cny` / `delta_pct`），首日无对比时为 null
+- `results`：逐项明细，用于填各分区表格
+
+只需调一次 `--report`，即可直接套用 Step 4 报告模板，无需再调 fetch_prices、无需手算口径、无需手取汇率、无需 tail 总额.csv。
+
+调试或仅需逐项明细时可用不带 `--report` 的原始命令：
 ```bash
 python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py
 ```
@@ -107,32 +123,47 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py --fun
   `market_value = max(0, 现价 - 行权价) × 持仓数 × (1 - 税率)`
   价外时（现价 ≤ 行权价）市值自动为 0；输出中额外包含 `tax_rate` 和 `intrinsic_gross`（税前内在价值）供参考
 - 输出 JSON 结果
+若用户要求“把测算数据沉淀/归档/别只放在/tmp”，运行：
+```bash
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/archive_reports.py --from-tmp
+```
+或按文件类型精确归档：
+```bash
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/archive_reports.py --valuation-json /path/to/valuation.json
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/archive_reports.py --retirement-json /path/to/retirement.json
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/archive_reports.py --ipo-csv /path/to/hk_ipo.csv
+```
 如需切回正式净值口径：
 ```bash
 python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py --fund-mode official
 ```
-**同步获取实时汇率（含 fallback）：**
-```python
-import akshare as ak, requests, math
-def get_fx_rates():
-    try:
-        df = ak.fx_spot_quote()
-        usd_row = df[df['货币对']=='USD/CNY'][['买报价','卖报价']].iloc[0]
-        hkd_row = df[df['货币对']=='HKD/CNY'][['买报价','卖报价']].iloc[0]
-        usd_cny = (float(usd_row['买报价']) + float(usd_row['卖报价'])) / 2
-        hkd_cny = (float(hkd_row['买报价']) + float(hkd_row['卖报价'])) / 2
-        if math.isnan(usd_cny) or math.isnan(hkd_cny):
-            raise ValueError("NaN from akshare")
-    except Exception:
-        r = requests.get('https://open.er-api.com/v6/latest/USD', timeout=5)
-        d = r.json()['rates']
-        usd_cny = d['CNY']
-        hkd_cny = usd_cny / d['HKD']
-    return usd_cny, hkd_cny, usd_cny / hkd_cny
-usd_cny, hkd_cny, usd_hkd = get_fx_rates()
+**实时汇率**：已由 `--report` 的 `fx` 字段提供（akshare→er-api fallback），直接取用，不要再写汇率获取代码。
+---
+### Step 3.5：港股IPO打新测算（若用户问“今年港股打新清单/全中一手收益/首日卖出收益/持有到现在收益”）
+运行：
+```bash
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/hk_ipo_ytd.py --year 2026
 ```
+脚本会生成：
+```text
+~/Desktop/持仓/测算归档/港股IPO/hk_ipo_ytd.csv
+```
+输出字段包括：
+- 上市日期、代号、名称、每手股数、上市价
+- 首日表现、估算首日收盘价、一手首日盈亏
+- 现价、一手当前盈亏、当前收益率
+- 超额倍数、稳中一手、中签率
+
+回答时优先用该 CSV 做：
+- 每只都中1手并首日卖出的总收益
+- 每只都中1手并持有到现在的收益率
+- 当前亏损股列表及其首日表现
+- 稳中一手资金需求
 ---
 ### Step 4：生成报告
+
+> 各口径折算市值/本金/盈亏/收益率**直接取自 `--report` 的 `summary.buckets`**，无需自行分类或折算；下列规则仅为口径释义（已固化在脚本 `classify_bucket` 中）。
+
 **盈亏统计规则：**
 - **LTI 账户**：市值计入总资产，但**不计入盈亏统计**（成本为零，不反映真实投资损益）
 - **投资资产口径**：只统计普通投资资产，用来衡量组合收益率；包含 `股票`、普通 `基金`、`加密货币`，但排除 `LTI` 账户，排除 `活期`、`存款`、`应收款`、`社保`，也排除备注为货币基金/类现金的基金
