@@ -1,16 +1,46 @@
 # stock-portfolio-valuation
 
-Claude skill for portfolio valuation from a local CSV.
-
-Portfolio valuation skill for Claude Code. It initializes holdings from natural language or screenshots, normalizes them into a local CSV, fetches market prices, and generates valuation, P&L, cash, and LTI summaries across USD, HKD, and CNY assets.
+A Claude Code skill for personal portfolio valuation. It initializes holdings from natural language or screenshots, normalizes them into a local CSV, fetches market prices, and generates valuation, P&L, cash, and LTI summaries across USD, HKD, and CNY assets.
 It also supports retirement-planning prompts such as `我什么时候可以不上班`, and can persist personal planning inputs into a local `profile.json`.
+
+## Requirements
+
+- Python 3.9+
+- Install dependencies:
+
+```bash
+pip3 install -r requirements.txt
+```
+
+Dependencies: `akshare` (A-share / HK / US quotes, fund NAV, FX, SGE gold), `requests`, `beautifulsoup4`, `pandas`.
+
+## Configuration
+
+By default all data lives in `~/Desktop/持仓`. To use a different folder, set the `PORTFOLIO_DIR` environment variable; every script honors it and falls back to the default when unset:
+
+```bash
+export PORTFOLIO_DIR=/path/to/your/portfolio
+```
+
+Throughout this README, `~/Desktop/持仓` refers to this portfolio folder (its default location).
+
+## Scope & Disclaimer
+
+- **Markets:** US / HK / A-share stocks, plus funds priced in CNY / HKD / USD. Quotes come from `akshare` (China-accessible sources), KGI, and Stock Events — so the skill is geared toward investors holding A-share / HK / US assets.
+- **Retirement projection assumes China urban social security** (default parameters tuned to Beijing: social-average wage, 个人账户计发月数, 缴费指数). It is a **planning-grade estimate** — by default it does not model investment returns or inflation, and it is **not** an actuarial calculation.
+- This tool is for personal bookkeeping and planning only. It is **not financial advice**, and it never places trades or moves money.
 
 ## Files
 
 - `SKILL.md`: skill instructions and workflow
-- `scripts/fetch_prices.py`: fetches prices and computes valuation JSON
-- `scripts/archive_reports.py`: archives calculation outputs into the local desktop portfolio folder
+- `requirements.txt`: Python dependencies
+- `scripts/init_portfolio.py`: creates the skeleton CSV / optional files in the portfolio folder
+- `scripts/fetch_prices.py`: fetches prices and computes the valuation JSON (the core script)
+- `scripts/profile_manager.py`: saves / shows the retirement `profile.json`
+- `scripts/retirement_projection.py`: estimates the earliest stop-working age/month and pension
+- `scripts/archive_reports.py`: archives calculation outputs into the portfolio folder
 - `scripts/hk_ipo_ytd.py`: fetches HK IPO year-to-date performance and calculates one-lot returns
+- `tests/test_core.py`: hermetic unit tests for the core calculations (no network, no real data)
 
 ## Init
 
@@ -38,16 +68,16 @@ account,category,name,code,market,currency,shares,cost_price,cost_total,last_mar
 
 Common values:
 
-- `account`: `富途` / `支付宝` / `腾讯理财通` / `LTI`
+- `account`: any free-text label — e.g. `富途` / `支付宝` / `腾讯理财通` / `LTI`. The `LTI` account is treated specially: its market value counts toward net worth, but its P&L is excluded from return statistics.
 - `category`: `股票` / `基金` / `活期` / `存款` / `应收款` / `社保` / `加密货币`
 - `market`: `US` / `HK` / `CN` / `FUND_USD` / `FUND_HKD` / `FUND_CNY`
 
 Other files are optional and can be added later:
 
-- `~/Desktop/持仓/总额.csv`
-- `~/Desktop/持仓/已实现盈亏.csv`
-- `~/Desktop/持仓/未来现金流.csv`
-- `~/Desktop/持仓/profile.json`
+- `~/Desktop/持仓/总额.csv` — daily total-asset history (written automatically by each valuation run)
+- `~/Desktop/持仓/未来现金流.csv` — future cash flows (annuity income, premiums) used by the retirement projection
+- `~/Desktop/持仓/profile.json` — retirement-planning inputs
+- `~/Desktop/持仓/已实现盈亏.csv` — **reserved**: a realized-P&L ledger skeleton created by `--with-optional-files`, not yet consumed by any report
 
 ## Retirement Profile
 
@@ -65,6 +95,8 @@ Optional planning fields:
 - `current_social_security_personal_account_cny`
 - `historical_contribution_multiple`
 - `future_contribution_multiple`
+- `social_avg_monthly_salary_cny_today` — local social-average monthly wage used for the pension base (default `12000`, tuned to Beijing; **non-Beijing users should set their own city's value**), updatable with `--social-avg-monthly-salary-cny-today`. The legacy key `beijing_average_monthly_salary_cny_today` is still read for backward compatibility.
+- `personal_account_interest_rate` — annual interest rate credited to the social-security personal account (default `0.03`)
 
 You can let the skill save them from natural language, or update them manually with:
 
@@ -246,13 +278,22 @@ Example CLI output shape:
 }
 ```
 
-## Privacy
+## Tests
 
-- This skill is designed for local personal finance workflows.
-- Source data stays in local files such as `~/Desktop/持仓/明细.csv`.
+Hermetic unit tests (no network, no real data) cover the core calculations — bucket classification, currency aggregation, after-tax option intrinsic value, fund-name matching, gold detection, and the pension / age formulas:
+
+```bash
+python3 -m unittest discover -s tests
+```
+
+## Privacy & Security
+
+- This skill is designed for local personal finance workflows. Source data stays in local files such as `~/Desktop/持仓/明细.csv` (or `$PORTFOLIO_DIR`).
+- **Filesystem:** scripts read and write only inside the portfolio folder (`~/Desktop/持仓` by default, or `$PORTFOLIO_DIR`).
+- **Network:** scripts make outbound HTTPS requests purely to fetch market data — akshare upstreams (Sina / EastMoney / SGE), `kgi.com.hk`, `stockevents.app`, `open.er-api.com`, and `aastocks.com`. No portfolio data is uploaded; requests carry only public tickers / fund codes.
+- **No secrets, no telemetry:** the skill stores no API keys or credentials and sends no analytics.
 - Example screenshots in this repository are privacy-obfuscated mockups, not real holdings data.
-- The skill should normalize screenshot or natural-language inputs into local CSV files before valuation.
-- Do not commit real portfolio CSV files, screenshots, or personal identifiers into a public repository.
+- Do not commit real portfolio CSV files, screenshots, `profile.json`, or personal identifiers into a public repository — `.gitignore` already excludes these.
 
 ## Examples
 

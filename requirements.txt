@@ -1,0 +1,7 @@
+# Runtime dependencies for the stock-portfolio-valuation skill.
+# Install with:  pip3 install -r requirements.txt
+
+akshare>=1.12          # A股/港股/美股行情、公募基金净值、汇率、上海金价
+requests>=2.28         # KGI / Stock Events 基金净值、汇率 fallback、AASTOCKS 抓取
+beautifulsoup4>=4.11   # 解析港股 IPO 列表页 (hk_ipo_ytd.py)
+pandas>=1.5            # 处理 akshare 返回的 DataFrame（通常随 akshare 一并安装）

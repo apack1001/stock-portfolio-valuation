@@ -5,11 +5,12 @@ Estimate earliest no-work age from profile.json, 总额.csv and 未来现金流.
 import argparse
 import csv
 import json
+import os
 from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
-BASE_DIR = Path.home() / "Desktop/持仓"
+BASE_DIR = Path(os.environ.get("PORTFOLIO_DIR", str(Path.home() / "Desktop/持仓")))
 PROFILE_PATH = BASE_DIR / "profile.json"
 TOTAL_PATH = BASE_DIR / "总额.csv"
 CASHFLOW_PATH = BASE_DIR / "未来现金流.csv"
@@ -42,7 +43,7 @@ class Profile:
     current_social_security_personal_account_cny: float = 0.0
     historical_contribution_multiple: float | None = None
     future_contribution_multiple: float | None = None
-    beijing_average_monthly_salary_cny_today: float = 12000.0
+    social_avg_monthly_salary_cny_today: float = 12000.0
     personal_account_interest_rate: float = 0.03
 
 
@@ -78,8 +79,10 @@ def load_profile() -> Profile:
             if data.get("future_contribution_multiple") not in (None, "")
             else None
         ),
-        beijing_average_monthly_salary_cny_today=float(
-            data.get("beijing_average_monthly_salary_cny_today") or 12000
+        social_avg_monthly_salary_cny_today=float(
+            data.get("social_avg_monthly_salary_cny_today")
+            or data.get("beijing_average_monthly_salary_cny_today")  # 向后兼容旧字段名
+            or 12000
         ),
         personal_account_interest_rate=(
             float(data["personal_account_interest_rate"])
@@ -208,7 +211,7 @@ def estimate_annual_pension(profile: Profile, current_age: float, stop_age: int)
         weighted_multiple = 1.0
 
     base_monthly = (
-        profile.beijing_average_monthly_salary_cny_today
+        profile.social_avg_monthly_salary_cny_today
         * (1 + weighted_multiple)
         / 2
         * total_years

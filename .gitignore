@@ -1,2 +1,19 @@
+# Python
 __pycache__/
 *.pyc
+
+# Local Claude Code config (machine-specific permissions; never publish)
+.claude/settings.local.json
+
+# OS / editor noise
+.DS_Store
+
+# Safety: never commit real portfolio data if it ends up inside the repo.
+# (By default the skill reads/writes ~/Desktop/持仓, outside this folder.)
+明细.csv
+总额.csv
+profile.json
+未来现金流.csv
+已实现盈亏.csv
+交易纪律.json
+测算归档/
