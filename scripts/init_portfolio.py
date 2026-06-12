@@ -8,9 +8,10 @@ Usage:
 """
 import argparse
 import csv
+import os
 from pathlib import Path
 
-BASE_DIR = Path.home() / "Desktop/持仓"
+BASE_DIR = Path(os.environ.get("PORTFOLIO_DIR", str(Path.home() / "Desktop/持仓")))
 DETAIL_PATH = BASE_DIR / "明细.csv"
 TOTAL_PATH = BASE_DIR / "总额.csv"
 REALIZED_PATH = BASE_DIR / "已实现盈亏.csv"
@@ -41,7 +42,7 @@ def ensure_profile(path: Path) -> bool:
   "current_social_security_personal_account_cny": null,
   "historical_contribution_multiple": null,
   "future_contribution_multiple": null,
-  "beijing_average_monthly_salary_cny_today": 12000
+  "social_avg_monthly_salary_cny_today": 12000
 }
 """,
         encoding="utf-8",

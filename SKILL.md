@@ -1,6 +1,10 @@
 ---
 name: stock-portfolio-valuation
 description: 从持仓CSV或本地截图读取持仓数据，支持首次初始化、实时获取最新行情，自动计算总估值、盈亏金额和盈亏比例，生成完整持仓报告。支持美股、港股、A股、基金（支付宝/腾讯理财通/富途理财）。也支持退休测算，当用户提到"我什么时候可以不上班"、"几岁可以退休"时触发。
+license: MIT
+metadata:
+  author: chenyuan1
+  version: 1.0.0
 ---
 # 股票持仓实时估值
 ## 数据源
@@ -21,7 +25,7 @@ description: 从持仓CSV或本地截图读取持仓数据，支持首次初始�
 python3 ~/.claude/skills/stock-portfolio-valuation/scripts/init_portfolio.py
 ```
 - 然后优先通过**自然语言或截图**补齐持仓
-  - 示例自然语言：`富途有300股YINN，成本37.153；招行现金60万`
+  - 示例自然语言：`富途有100股AAPL，成本150；招行现金10万`
   - 示例截图：股票持仓页、基金持仓页、自由现金页
 - 用 Read 工具读取图片，识别字段
   - 股票：名称、代码、市场、持仓数量、成本均价
@@ -47,7 +51,7 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/init_portfolio.py
   - `future_contribution_multiple`
 - 保存方式：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/profile_manager.py --birth-year-month 1989-07 --years-worked 14.5 --annual-spending-cny 400000 --annual-savings-cny 500000
+python3 ~/.claude/skills/stock-portfolio-valuation/scripts/profile_manager.py --birth-year-month 1990-01 --years-worked 10 --annual-spending-cny 300000 --annual-savings-cny 200000
 ```
 - 如需跑退休测算：
 ```bash

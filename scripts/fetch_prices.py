@@ -5,7 +5,7 @@
   python3 fetch_prices.py
   python3 fetch_prices.py --fund-mode official
 """
-import sys, json, csv, re, argparse
+import sys, os, json, csv, re, argparse
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -13,8 +13,14 @@ def parse_tax_rate(note: str):
     """从 note 中提取税率，如「税率20%」→ 0.20，未找到返回 None"""
     m = re.search(r'税率\s*(\d+(?:\.\d+)?)\s*%', note or "")
     return float(m.group(1)) / 100 if m else None
-CSV_PATH = Path.home() / "Desktop/持仓/明细.csv"
-TOTAL_PATH = Path.home() / "Desktop/持仓/总额.csv"
+
+def option_after_tax_value(price, strike, shares, tax_rate):
+    """未行权期权的税后内在价值市值；价外（price<=strike）时为 0。"""
+    intrinsic = max(0.0, price - strike)
+    return round(intrinsic * shares * (1 - tax_rate), 2)
+BASE_DIR = Path(os.environ.get("PORTFOLIO_DIR", str(Path.home() / "Desktop/持仓")))
+CSV_PATH = BASE_DIR / "明细.csv"
+TOTAL_PATH = BASE_DIR / "总额.csv"
 _FUND_ESTIMATION_CACHE = None
 _GOLD_PRICE_CACHE = None
 _KGI_FUND_CACHE = {}
@@ -102,15 +108,17 @@ def _find_col(columns, pattern):
             return col
     return None
 def fund_name_matches(expected: str, actual: str):
-    """粗校验基金代码是否指向同一只基金，避免代码填错时误用净值。"""
+    """粗校验基金代码是否指向同一只基金，避免代码填错时误用净值。
+    通用做法：归一化后，首二字（基金公司）相同或整体相似度达标即视为匹配，
+    不依赖任何与具体持仓相关的关键词。"""
     expected = re.sub(r"[\s（）()·\-_/]", "", expected or "")
     actual = re.sub(r"[\s（）()·\-_/]", "", actual or "")
     if not expected or not actual:
         return False
     if expected[:2] == actual[:2]:
         return True
-    keywords = ["人工智能", "半导体", "机器人", "卫星", "新能源", "创业板", "证券", "黄金"]
-    return any(k in expected and k in actual for k in keywords)
+    from difflib import SequenceMatcher
+    return SequenceMatcher(None, expected, actual).ratio() >= 0.5
 def fetch_fund_estimation_map():
     """东方财富盘中净值估算：返回 code -> 估算净值/公布净值等。"""
     global _FUND_ESTIMATION_CACHE
@@ -311,13 +319,9 @@ def price_gold_gram_asset(row):
         "updated_at": updated_at,
     }
 def is_gold_gram_asset(row):
-    """识别按黄金克数记账的基金行，避免刷新备注后丢失识别口径。"""
-    note = row.get("note", "")
-    if "黄金克数" in note:
-        return True
-    code = str(row.get("code", "")).strip()
-    cost_price = to_float(row.get("cost_price", ""))
-    return code == "002621" and cost_price is not None and cost_price > 100
+    """识别按黄金克数记账的基金行：约定在 note 中标注「黄金克数」。
+    估值脚本写回备注时会保留该标记，故无需绑定任何具体基金代码。"""
+    return "黄金克数" in (row.get("note", "") or "")
 def load_csv():
     if not CSV_PATH.exists():
         return None
@@ -377,13 +381,16 @@ def write_back_funds(rows, results):
             row["note"] = note
         changed += 1
     if changed:
-        fieldnames = [
+        # 以 CSV 原有列为准，避免写死列导致丢列/报错；缺失的标准列补在末尾
+        base_fields = [
             "account", "category", "name", "code", "market", "currency",
             "shares", "cost_price", "cost_total", "last_market_value",
             "last_pnl", "last_updated", "note",
         ]
+        existing = list(rows[0].keys()) if rows else base_fields
+        fieldnames = existing + [f for f in base_fields if f not in existing]
         with open(CSV_PATH, "w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
             writer.writeheader()
             writer.writerows(rows)
     return changed
@@ -567,9 +574,11 @@ def process(rows, fund_mode="official"):
         }
         # 股票：实时获取价格
         if market in ("US", "HK", "CN") and shares_s:
-            shares = float(shares_s)
-            cost_price = float(cost_price_s) if cost_price_s else 0
             try:
+                shares = to_float(shares_s)
+                cost_price = to_float(cost_price_s) or 0
+                if shares is None:
+                    raise ValueError(f"shares 字段无法解析为数字: {shares_s!r}")
                 if market == "US":
                     price = fetch_us_price(row["code"])
                 elif market == "HK":
@@ -581,7 +590,7 @@ def process(rows, fund_mode="official"):
                     if tax_rate is not None:
                         # 未行权期权：市值 = 税后内在价值（价外时为0）
                         intrinsic = max(0.0, price - cost_price)
-                        mv  = round(intrinsic * shares * (1 - tax_rate), 2)
+                        mv  = option_after_tax_value(price, cost_price, shares, tax_rate)
                         pnl = mv  # 税后净收益即为税后内在价值
                         pnl_pct = round(intrinsic / cost_price * 100 * (1 - tax_rate), 2) if cost_price > 0 else None
                         base.update({
@@ -612,7 +621,7 @@ def process(rows, fund_mode="official"):
                     })
             except Exception as e:
                 base.update({
-                    "shares": shares, "cost_price": cost_price,
+                    "shares": to_float(shares_s), "cost_price": to_float(cost_price_s) or 0,
                     "market_value": None, "pnl": None, "pnl_pct": None,
                     "error": str(e),
                 })

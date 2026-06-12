@@ -2,6 +2,7 @@
 """Fetch Hong Kong IPO year-to-date performance from AASTOCKS."""
 import argparse
 import csv
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -10,7 +11,7 @@ import requests
 from bs4 import BeautifulSoup
 
 
-DEFAULT_OUT = Path.home() / "Desktop/持仓/测算归档/港股IPO"
+DEFAULT_OUT = Path(os.environ.get("PORTFOLIO_DIR", str(Path.home() / "Desktop/持仓"))) / "测算归档/港股IPO"
 LISTED_IPO_URL = "https://www.aastocks.com/sc/stocks/market/ipo/listedipo.aspx?s=3&o=0&page={page}"
 
 

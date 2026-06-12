@@ -5,6 +5,31 @@ Claude skill for portfolio valuation from a local CSV.
 Portfolio valuation skill for Claude Code. It initializes holdings from natural language or screenshots, normalizes them into a local CSV, fetches market prices, and generates valuation, P&L, cash, and LTI summaries across USD, HKD, and CNY assets.
 It also supports retirement-planning prompts such as `我什么时候可以不上班`, and can persist personal planning inputs into a local `profile.json`.
 
+## Requirements
+
+- Python 3.9+
+- Install dependencies:
+
+```bash
+pip3 install -r requirements.txt
+```
+
+Dependencies: `akshare` (A-share / HK / US quotes, fund NAV, FX, SGE gold), `requests`, `beautifulsoup4`, `pandas`.
+
+## Configuration
+
+By default all data lives in `~/Desktop/持仓`. To use a different folder, set the `PORTFOLIO_DIR` environment variable; every script honors it and falls back to the default when unset:
+
+```bash
+export PORTFOLIO_DIR=/path/to/your/portfolio
+```
+
+## Scope & Disclaimer
+
+- **Markets:** US / HK / A-share stocks, plus funds priced in CNY / HKD / USD. Quotes come from `akshare` (China-accessible sources), KGI, and Stock Events — so the skill is geared toward investors holding A-share / HK / US assets.
+- **Retirement projection assumes China urban social security** (default parameters tuned to Beijing: social-average wage, 个人账户计发月数, 缴费指数). It is a **planning-grade estimate** — by default it does not model investment returns or inflation, and it is **not** an actuarial calculation.
+- This tool is for personal bookkeeping and planning only. It is **not financial advice**, and it never places trades or moves money.
+
 ## Files
 
 - `SKILL.md`: skill instructions and workflow
@@ -246,13 +271,14 @@ Example CLI output shape:
 }
 ```
 
-## Privacy
+## Privacy & Security
 
-- This skill is designed for local personal finance workflows.
-- Source data stays in local files such as `~/Desktop/持仓/明细.csv`.
+- This skill is designed for local personal finance workflows. Source data stays in local files such as `~/Desktop/持仓/明细.csv` (or `$PORTFOLIO_DIR`).
+- **Filesystem:** scripts read and write only inside the portfolio folder (`~/Desktop/持仓` by default, or `$PORTFOLIO_DIR`).
+- **Network:** scripts make outbound HTTPS requests purely to fetch market data — akshare upstreams (Sina / EastMoney / SGE), `kgi.com.hk`, `stockevents.app`, `open.er-api.com`, and `aastocks.com`. No portfolio data is uploaded; requests carry only public tickers / fund codes.
+- **No secrets, no telemetry:** the skill stores no API keys or credentials and sends no analytics.
 - Example screenshots in this repository are privacy-obfuscated mockups, not real holdings data.
-- The skill should normalize screenshot or natural-language inputs into local CSV files before valuation.
-- Do not commit real portfolio CSV files, screenshots, or personal identifiers into a public repository.
+- Do not commit real portfolio CSV files, screenshots, `profile.json`, or personal identifiers into a public repository — `.gitignore` already excludes these.
 
 ## Examples
 
