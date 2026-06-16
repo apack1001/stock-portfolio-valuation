@@ -7,6 +7,13 @@ metadata:
   version: 1.0.0
 ---
 # 股票持仓实时估值
+
+## 脚本路径约定
+
+本 skill 的所有脚本位于其基目录下的 `scripts/`。基目录在加载时以「Base directory for this skill: <绝对路径>」给出；作为插件（plugin）安装时即环境变量 `CLAUDE_PLUGIN_ROOT` 指向的目录。
+
+**下文命令中的 `${SKILL_DIR}` 是占位符，执行前必须替换为上述基目录的真实绝对路径**（个人安装通常为 `~/.claude/skills/stock-portfolio-valuation`，插件安装为 `CLAUDE_PLUGIN_ROOT`）。不要把 `${SKILL_DIR}` 原样传给 shell。
+
 ## 数据源
 持仓数据的**唯一可信来源**是 `~/Desktop/持仓/明细.csv`。
 - 未来收入/支出计划记录在 `~/Desktop/持仓/未来现金流.csv`，例如年金保险领取、保费支出、未来确定性款项；这类现金流**不计入当前持仓市值**，只在退休/长期现金流测算中使用
@@ -22,7 +29,7 @@ metadata:
 **A. 首次使用，CSV 不存在**：
 - 先运行初始化脚本创建骨架文件：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/init_portfolio.py
+python3 ${SKILL_DIR}/scripts/init_portfolio.py
 ```
 - 然后优先通过**自然语言或截图**补齐持仓
   - 示例自然语言：`富途有100股AAPL，成本150；招行现金10万`
@@ -51,19 +58,19 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/init_portfolio.py
   - `future_contribution_multiple`
 - 保存方式：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/profile_manager.py --birth-year-month 1990-01 --years-worked 10 --annual-spending-cny 300000 --annual-savings-cny 200000
+python3 ${SKILL_DIR}/scripts/profile_manager.py --birth-year-month 1990-01 --years-worked 10 --annual-spending-cny 300000 --annual-savings-cny 200000
 ```
 - 如需跑退休测算：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection.py
+python3 ${SKILL_DIR}/scripts/retirement_projection.py
 ```
 - 如需只看某个停工年龄：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection.py --stop-age 46
+python3 ${SKILL_DIR}/scripts/retirement_projection.py --stop-age 46
 ```
 - 如需精确到某个停工月份：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection.py --stop-month 2038-02
+python3 ${SKILL_DIR}/scripts/retirement_projection.py --stop-month 2038-02
 ```
 - 当用户问“精确到月”“倒计时到月”时，优先使用输出里的 `earliest_no_work_month_projection` 和 `nearby_month_scenarios`；年度口径 `earliest_no_work_projection` 只作为粗略参考。
 - 退休测算默认优先读取：
@@ -97,7 +104,7 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection
 
 **持仓分析/估值报告：优先用 `--report`，一条命令拿到全部所需数据，避免手写内联聚合代码：**
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py --report
+python3 ${SKILL_DIR}/scripts/fetch_prices.py --report
 ```
 `--report` 直接返回报告所需的全部结构，**不要再手写任何 FX 获取或分类汇总的 Python**：
 - `fx`：`usd_cny` / `hkd_cny` / `usd_hkd` / `date`（含 akshare→er-api fallback）
@@ -110,7 +117,7 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py --rep
 
 调试或仅需逐项明细时可用不带 `--report` 的原始命令：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py
+python3 ${SKILL_DIR}/scripts/fetch_prices.py
 ```
 脚本自动：
 - 读取 CSV
@@ -120,7 +127,7 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py
 - 默认将本次总资产汇总按日期 upsert 到 `~/Desktop/持仓/总额.csv`，同一天重复执行会覆盖当天记录，不会重复追加；如只想调试输出可加 `--no-write-history`
 - 当用户要求“基金全部更新/刷新基金净值/下次也用最新值”时，运行：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py --fund-mode estimate --write-back-funds
+python3 ${SKILL_DIR}/scripts/fetch_prices.py --fund-mode estimate --write-back-funds
 ```
   该命令会把成功获取到的基金 `last_market_value`、`last_pnl`、`last_updated` 和净值来源写回 `~/Desktop/持仓/明细.csv`；未获取成功的基金保留原快照
 - **若 note 中含 `税率X%`**（未行权期权），按税后内在价值计算市值：
@@ -129,24 +136,24 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py --fun
 - 输出 JSON 结果
 若用户要求“把测算数据沉淀/归档/别只放在/tmp”，运行：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/archive_reports.py --from-tmp
+python3 ${SKILL_DIR}/scripts/archive_reports.py --from-tmp
 ```
 或按文件类型精确归档：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/archive_reports.py --valuation-json /path/to/valuation.json
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/archive_reports.py --retirement-json /path/to/retirement.json
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/archive_reports.py --ipo-csv /path/to/hk_ipo.csv
+python3 ${SKILL_DIR}/scripts/archive_reports.py --valuation-json /path/to/valuation.json
+python3 ${SKILL_DIR}/scripts/archive_reports.py --retirement-json /path/to/retirement.json
+python3 ${SKILL_DIR}/scripts/archive_reports.py --ipo-csv /path/to/hk_ipo.csv
 ```
 如需切回正式净值口径：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/fetch_prices.py --fund-mode official
+python3 ${SKILL_DIR}/scripts/fetch_prices.py --fund-mode official
 ```
 **实时汇率**：已由 `--report` 的 `fx` 字段提供（akshare→er-api fallback），直接取用，不要再写汇率获取代码。
 ---
 ### Step 3.5：港股IPO打新测算（若用户问“今年港股打新清单/全中一手收益/首日卖出收益/持有到现在收益”）
 运行：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/hk_ipo_ytd.py --year 2026
+python3 ${SKILL_DIR}/scripts/hk_ipo_ytd.py --year 2026
 ```
 脚本会生成：
 ```text
@@ -264,7 +271,7 @@ python3 ~/.claude/skills/stock-portfolio-valuation/scripts/hk_ipo_ytd.py --year 
 ### Step 4.5：持仓报告自动追加退休倒计时
 当用户询问 `持仓`、`持仓总值`、`持仓分析`、`持仓明细`、`估值`、`完整版持仓估值报告` 等资产估值类问题时，完成 Step 3/4 后一并运行退休测算：
 ```bash
-python3 ~/.claude/skills/stock-portfolio-valuation/scripts/retirement_projection.py --current-total-assets-cny {本次估值总资产CNY}
+python3 ${SKILL_DIR}/scripts/retirement_projection.py --current-total-assets-cny {本次估值总资产CNY}
 ```
 - 使用本次刚算出的总资产作为 `--current-total-assets-cny`，不要只依赖 `总额.csv` 的旧值
 - 若 `profile.json` 缺失必要字段，提示用户补充出生年月、已工作年限、每年支出、每年可攒金额；不要阻塞持仓报告本身
