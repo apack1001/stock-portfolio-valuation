@@ -24,6 +24,35 @@ metadata:
 - **每次买入/卖出/基金变动后立即更新 CSV**，再生成报告
 - 基金市值优先用脚本刷新最新净值；截图只作为自动源失败时的补录来源
 ---
+## 富途持仓自动同步（可选）
+当用户说"同步富途持仓"、"从富途拉持仓/对账"、"富途账户对一下账"时触发。需用户本地已运行 Futu OpenD 网关并登录、且已 `pip3 install futu-api`；否则脚本会优雅降级并提示，不影响其它功能。
+
+```bash
+python3 ${SKILL_DIR}/scripts/fetch_futu_positions.py            # 只读对账，输出 JSON
+python3 ${SKILL_DIR}/scripts/fetch_futu_positions.py --summary  # 人类可读对账表
+python3 ${SKILL_DIR}/scripts/fetch_futu_positions.py --write-back  # 保守写回 明细.csv
+```
+
+要点：
+- **只读**：仅查询持仓/资金，绝不下单或解锁交易；符合"绝不交易"原则。
+- **仅覆盖证券**（股票/ETF场内/期权/期货），**不提供场外公募基金净值**——基金仍走盘中估算/官方净值，T+1 是基金固有属性。
+- `--write-back` 保守：同一代码若在 LTI 等其它账户也持有（普通股+激励双重持仓），跳过自动写、仅标记，避免错并 Futu 合计股数；CSV 有而 Futu 查不到的富途行只标记疑似清仓，绝不自动删。
+- 同步后可再跑 `${SKILL_DIR}/scripts/fetch_prices.py --report` 生成最新估值。
+
+当用户说"补历史已实现盈亏"、"审计过往买卖"、"导入富途成交"时，用历史成交脚本：
+
+```bash
+python3 ${SKILL_DIR}/scripts/fetch_futu_deals.py --start 2024-01-01 --summary  # 只读：FIFO 算每笔已实现盈亏
+python3 ${SKILL_DIR}/scripts/fetch_futu_deals.py --start 2024-01-01 --write-ledger  # 写入 已实现盈亏.csv（按 日期+代码+金额 去重）
+```
+
+成交脚本要点：
+- `history_deal_list_query` **限频每30秒10次**，脚本已内置节流（每次间隔 3.2s），全历史会跑约 1 分钟。
+- 富途**历史成交仅可回溯约 2 年**；更早的买入查不到，对应卖出会标 `needs_manual`（不臆造成本），需人工补。
+- **仅证券成交**：不含转仓（如股票转户）、基金申赎、支付宝/腾讯交易。
+- USD/HKD 等不同币种**分开合计**，不可混加。
+- 写入台账前按 日期+代码+金额去重；但若已有记录是"按标的累计"口径（与逐笔金额对不上），仍可能语义重复，需人工判断。
+---
 ## 执行步骤
 ### Step 1：确定数据来源
 **A. 首次使用，CSV 不存在**：

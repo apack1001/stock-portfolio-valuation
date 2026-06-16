@@ -79,7 +79,7 @@ Other files are optional and can be added later:
 - `~/Desktop/持仓/总额.csv` — daily total-asset history (written automatically by each valuation run)
 - `~/Desktop/持仓/未来现金流.csv` — future cash flows (annuity income, premiums) used by the retirement projection
 - `~/Desktop/持仓/profile.json` — retirement-planning inputs
-- `~/Desktop/持仓/已实现盈亏.csv` — **reserved**: a realized-P&L ledger skeleton created by `--with-optional-files`, not yet consumed by any report
+- `~/Desktop/持仓/已实现盈亏.csv` — realized-P&L (closed-position) ledger with header `date,name,code,market,currency,realized_pnl,note`. Populate it manually, or import from Futu historical deals (FIFO) via `scripts/fetch_futu_deals.py --write-ledger` (which de-duplicates by date+code+amount before writing)
 
 ## Retirement Profile
 
@@ -279,6 +279,30 @@ Example CLI output shape:
   }
 }
 ```
+
+## Futu Position Sync (optional)
+
+If you use Futu (富途) Securities, you can **read-only** sync your real Futu account positions and cash into `明细.csv` via the Futu OpenAPI, instead of maintaining them by hand. This is an optional enhancement with **no default dependency**:
+
+Prerequisites (only for this feature):
+- Run the Futu OpenD gateway locally and log in to your Futu account
+- Install the optional dependency: `pip3 install futu-api`
+
+```bash
+python3 scripts/fetch_futu_positions.py            # read-only reconciliation, JSON output
+python3 scripts/fetch_futu_positions.py --summary  # human-readable reconciliation table
+python3 scripts/fetch_futu_positions.py --write-back  # conservatively write back to 明细.csv
+
+# Historical deals -> realized P&L / audit (FIFO, read-only; --write-ledger writes 已实现盈亏.csv)
+python3 scripts/fetch_futu_deals.py --start 2024-01-01 --summary
+python3 scripts/fetch_futu_deals.py --start 2024-01-01 --write-ledger
+```
+
+Notes:
+- **Read-only:** queries positions / cash only; it never places orders or unlocks trading.
+- **Securities only** (stocks / listed ETFs / options / futures); it does **not** provide OTC mutual-fund NAV — funds still use intraday-estimated / official NAV, and T+1 is inherent to funds.
+- `--write-back` is conservative: if a code is also held under another account (e.g. LTI), it is skipped and only flagged; Futu-account rows present in the CSV but missing from Futu are flagged as possibly closed, never auto-deleted.
+- If OpenD is not running or `futu-api` is not installed, the script exits fast with a friendly message and does not affect other features.
 
 ## Tests
 

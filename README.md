@@ -79,7 +79,7 @@ account,category,name,code,market,currency,shares,cost_price,cost_total,last_mar
 - `~/Desktop/持仓/总额.csv` — 每日总资产历史（每次估值运行自动写入）
 - `~/Desktop/持仓/未来现金流.csv` — 退休测算使用的未来现金流（年金领取、保费）
 - `~/Desktop/持仓/profile.json` — 退休规划参数
-- `~/Desktop/持仓/已实现盈亏.csv` — **预留**：由 `--with-optional-files` 创建的已实现盈亏台账骨架，目前尚未被任何报告使用
+- `~/Desktop/持仓/已实现盈亏.csv` — 已实现盈亏（平仓）台账：表头 `date,name,code,market,currency,realized_pnl,note`。可手动补录，也可用 `scripts/fetch_futu_deals.py --write-ledger` 从富途历史成交按 FIFO 导入（写入前按 日期+代码+金额 去重）
 
 ## 退休画像
 
@@ -279,6 +279,30 @@ CLI 输出示例结构：
   }
 }
 ```
+
+## 富途持仓同步（可选）
+
+如果你用富途证券，可通过 Futu OpenAPI 把富途账户的真实持仓与现金**只读**同步到 `明细.csv`，省去手动维护。这是可选增强，**默认不依赖**：
+
+前置条件（仅此功能需要）：
+- 本地运行 Futu OpenD 网关并登录富途账号
+- 安装可选依赖：`pip3 install futu-api`
+
+```bash
+python3 scripts/fetch_futu_positions.py            # 只读对账，输出 JSON
+python3 scripts/fetch_futu_positions.py --summary  # 人类可读对账表
+python3 scripts/fetch_futu_positions.py --write-back  # 保守写回 明细.csv
+
+# 历史成交 → 已实现盈亏 / 审计（FIFO，只读；--write-ledger 写入 已实现盈亏.csv）
+python3 scripts/fetch_futu_deals.py --start 2024-01-01 --summary
+python3 scripts/fetch_futu_deals.py --start 2024-01-01 --write-ledger
+```
+
+说明：
+- **只读**：仅查询持仓/资金，绝不下单或解锁交易。
+- **仅覆盖证券**（股票 / 场内 ETF / 期权 / 期货）；**不提供场外公募基金净值**，基金仍按盘中估算 / 官方净值，T+1 为其固有属性。
+- `--write-back` 保守：同一代码若同时存在于 LTI 等其它账户，跳过自动写、仅标记；CSV 有而 Futu 查不到的富途行只标记疑似清仓，绝不自动删除。
+- 未启动 OpenD 或未安装 `futu-api` 时，脚本会快速给出友好提示并退出，不影响其它功能。
 
 ## 测试
 
