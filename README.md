@@ -1,104 +1,106 @@
 # stock-portfolio-valuation
 
-A Claude Code skill for personal portfolio valuation. It initializes holdings from natural language or screenshots, normalizes them into a local CSV, fetches market prices, and generates valuation, P&L, cash, and LTI summaries across USD, HKD, and CNY assets.
-It also supports retirement-planning prompts such as `我什么时候可以不上班`, and can persist personal planning inputs into a local `profile.json`.
+> 语言：中文 | [English](README.en.md)
 
-## Requirements
+一个用于个人持仓估值的 Claude Code skill。它能从自然语言或截图初始化持仓，归一化为本地 CSV，获取市场行情，并生成覆盖美元、港元、人民币资产的估值、盈亏、现金与 LTI 汇总。
+它还支持退休规划类提问（如 `我什么时候可以不上班`），并可将个人规划参数持久化到本地 `profile.json`。
+
+## 环境要求
 
 - Python 3.9+
-- Install dependencies:
+- 安装依赖：
 
 ```bash
 pip3 install -r requirements.txt
 ```
 
-Dependencies: `akshare` (A-share / HK / US quotes, fund NAV, FX, SGE gold), `requests`, `beautifulsoup4`, `pandas`.
+依赖：`akshare`（A股 / 港股 / 美股行情、基金净值、汇率、上金所黄金）、`requests`、`beautifulsoup4`、`pandas`。
 
-## Configuration
+## 配置
 
-By default all data lives in `~/Desktop/持仓`. To use a different folder, set the `PORTFOLIO_DIR` environment variable; every script honors it and falls back to the default when unset:
+默认所有数据都存放在 `~/Desktop/持仓`。如需使用其他目录，设置环境变量 `PORTFOLIO_DIR`，所有脚本都会读取它，未设置时回退到默认目录：
 
 ```bash
 export PORTFOLIO_DIR=/path/to/your/portfolio
 ```
 
-Throughout this README, `~/Desktop/持仓` refers to this portfolio folder (its default location).
+本文中的 `~/Desktop/持仓` 均指这个持仓数据目录（其默认位置）。
 
-## Scope & Disclaimer
+## 适用范围与免责声明
 
-- **Markets:** US / HK / A-share stocks, plus funds priced in CNY / HKD / USD. Quotes come from `akshare` (China-accessible sources), KGI, and Stock Events — so the skill is geared toward investors holding A-share / HK / US assets.
-- **Retirement projection assumes China urban social security** (default parameters tuned to Beijing: social-average wage, 个人账户计发月数, 缴费指数). It is a **planning-grade estimate** — by default it does not model investment returns or inflation, and it is **not** an actuarial calculation.
-- This tool is for personal bookkeeping and planning only. It is **not financial advice**, and it never places trades or moves money.
+- **市场**：美股 / 港股 / A股股票，以及以人民币 / 港元 / 美元计价的基金。行情来自 `akshare`（中国大陆可访问的数据源）、凯基（KGI）和 Stock Events——因此本 skill 面向持有 A股 / 港股 / 美股资产的投资者。
+- **退休测算基于中国城镇职工社保**（默认参数按北京调校：社会平均工资、个人账户计发月数、缴费指数）。它是**规划级估算**——默认不建模投资收益或通胀，**不是**精算结果。
+- 本工具仅用于个人记账与规划，**不构成投资建议**，也绝不执行交易或转移资金。
 
-## Files
+## 文件说明
 
-- `SKILL.md`: skill instructions and workflow
-- `requirements.txt`: Python dependencies
-- `scripts/init_portfolio.py`: creates the skeleton CSV / optional files in the portfolio folder
-- `scripts/fetch_prices.py`: fetches prices and computes the valuation JSON (the core script)
-- `scripts/profile_manager.py`: saves / shows the retirement `profile.json`
-- `scripts/retirement_projection.py`: estimates the earliest stop-working age/month and pension
-- `scripts/archive_reports.py`: archives calculation outputs into the portfolio folder
-- `scripts/hk_ipo_ytd.py`: fetches HK IPO year-to-date performance and calculates one-lot returns
-- `tests/test_core.py`: hermetic unit tests for the core calculations (no network, no real data)
+- `SKILL.md`：skill 指令与工作流
+- `requirements.txt`：Python 依赖
+- `scripts/init_portfolio.py`：在持仓目录创建骨架 CSV / 可选文件
+- `scripts/fetch_prices.py`：获取行情并计算估值 JSON（核心脚本）
+- `scripts/profile_manager.py`：保存 / 查看退休 `profile.json`
+- `scripts/retirement_projection.py`：测算最早可停工的年龄/月份及养老金
+- `scripts/archive_reports.py`：将测算结果归档到持仓目录
+- `scripts/hk_ipo_ytd.py`：获取港股年内打新表现并计算一手收益
+- `tests/test_core.py`：核心计算的隔离单元测试（无网络、无真实数据）
 
-## Init
+## 初始化
 
-First-time setup can start from natural language plus screenshots.
+首次使用可以从自然语言加截图开始。
 
-Typical ways to initialize:
+常见初始化方式：
 
-- Send a message like `持仓` / `帮我初始化持仓`
-- Paste stock or fund account screenshots
-- Describe holdings in natural language, such as buy price, shares, fund market value, or cash balance
+- 发送类似 `持仓` / `帮我初始化持仓` 的消息
+- 粘贴股票或基金账户截图
+- 用自然语言描述持仓，例如买入价、股数、基金市值或现金余额
 
-The skill will extract the information and normalize it into the local CSV.
+skill 会提取信息并归一化为本地 CSV。
 
-If you want to initialize manually, only one required file is needed:
+如果想手动初始化，只需一个必需文件：
 
 ```bash
 mkdir -p ~/Desktop/持仓
 ```
 
-Create `~/Desktop/持仓/明细.csv` with:
+创建 `~/Desktop/持仓/明细.csv`，表头为：
 
 ```csv
 account,category,name,code,market,currency,shares,cost_price,cost_total,last_market_value,last_pnl,last_updated,note
 ```
 
-Common values:
+常用取值：
 
-- `account`: any free-text label — e.g. `富途` / `支付宝` / `腾讯理财通` / `LTI`. The `LTI` account is treated specially: its market value counts toward net worth, but its P&L is excluded from return statistics.
-- `category`: `股票` / `基金` / `活期` / `存款` / `应收款` / `社保` / `加密货币`
-- `market`: `US` / `HK` / `CN` / `FUND_USD` / `FUND_HKD` / `FUND_CNY`
+- `account`：任意自由文本标签——如 `富途` / `支付宝` / `腾讯理财通` / `LTI`。`LTI` 账户会被特殊处理：其市值计入总身家，但盈亏不计入收益统计。
+- `category`：`股票` / `基金` / `活期` / `存款` / `应收款` / `社保` / `加密货币`
+- `market`：`US` / `HK` / `CN` / `FUND_USD` / `FUND_HKD` / `FUND_CNY`
 
-Other files are optional and can be added later:
+其他文件均为可选，可后续添加：
 
-- `~/Desktop/持仓/总额.csv` — daily total-asset history (written automatically by each valuation run)
-- `~/Desktop/持仓/未来现金流.csv` — future cash flows (annuity income, premiums) used by the retirement projection
-- `~/Desktop/持仓/profile.json` — retirement-planning inputs
-- `~/Desktop/持仓/已实现盈亏.csv` — **reserved**: a realized-P&L ledger skeleton created by `--with-optional-files`, not yet consumed by any report
+- `~/Desktop/持仓/总额.csv` — 每日总资产历史（每次估值运行自动写入）
+- `~/Desktop/持仓/未来现金流.csv` — 退休测算使用的未来现金流（年金领取、保费）
+- `~/Desktop/持仓/profile.json` — 退休规划参数
+- `~/Desktop/持仓/已实现盈亏.csv` — **预留**：由 `--with-optional-files` 创建的已实现盈亏台账骨架，目前尚未被任何报告使用
 
-## Retirement Profile
+## 退休画像
 
-When you ask something like `我什么时候可以不上班`, the skill can save or reuse these profile fields:
+当你问类似 `我什么时候可以不上班` 时，skill 可保存或复用以下画像字段：
 
 - `birth_year_month`
 - `years_worked`
 - `annual_spending_cny`
 - `annual_savings_cny`
 
-Optional planning fields:
+可选规划字段：
 
 - `retirement_age`
 - `lifespan_age`
 - `current_social_security_personal_account_cny`
 - `historical_contribution_multiple`
 - `future_contribution_multiple`
-- `social_avg_monthly_salary_cny_today` — local social-average monthly wage used for the pension base (default `12000`, tuned to Beijing; **non-Beijing users should set their own city's value**), updatable with `--social-avg-monthly-salary-cny-today`. The legacy key `beijing_average_monthly_salary_cny_today` is still read for backward compatibility.
-- `personal_account_interest_rate` — annual interest rate credited to the social-security personal account (default `0.03`)
+- `social_avg_monthly_salary_cny_today` — 用于养老金基数的当地社会平均月工资（默认 `12000`，按北京调校；**非北京用户应设置本城市的数值**），可用 `--social-avg-monthly-salary-cny-today` 更新。旧字段名 `beijing_average_monthly_salary_cny_today` 仍向后兼容读取。
+- `personal_account_interest_rate` — 社保个人账户的年记账利率（默认 `0.03`）
 
-You can let the skill save them from natural language, or update them manually with:
+你可以让 skill 从自然语言中保存这些字段，或手动更新：
 
 ```bash
 python3 scripts/profile_manager.py --birth-year-month YYYY-MM --years-worked N \
@@ -106,7 +108,7 @@ python3 scripts/profile_manager.py --birth-year-month YYYY-MM --years-worked N \
 python3 scripts/profile_manager.py --show
 ```
 
-Typical natural-language inputs:
+常见自然语言输入：
 
 - `我是90后，出生年月是YYYY-MM`
 - `我大概工作了十几年`
@@ -115,7 +117,7 @@ Typical natural-language inputs:
 - `我的社保个人账户现在大约有一笔余额`
 - `之前按较高档位交，未来计划继续按更高档位交`
 
-## Run
+## 运行
 
 ```bash
 python3 scripts/init_portfolio.py
@@ -130,19 +132,19 @@ python3 scripts/archive_reports.py --from-tmp
 python3 scripts/hk_ipo_ytd.py --year 2026
 ```
 
-Notes:
+说明：
 
-- `FUND_CNY` funds prefer intraday estimated NAV, then fall back to official NAV.
-- `FUND_HKD` and `FUND_USD` funds now try to fetch latest NAV from KGI fund-detail pages first, then Stock Events `.FUND` pages.
-- If an offshore fund cannot be resolved from the online source, the skill falls back to the local snapshot stored in `明细.csv`.
-- Use `--write-back-funds` when you want successful fund refreshes saved back into `~/Desktop/持仓/明细.csv` for future runs.
-- Each valuation run writes or replaces the same-day row in `~/Desktop/持仓/总额.csv`; use `--no-write-history` for dry debug runs.
-- Use `scripts/archive_reports.py` to persist temporary valuation, retirement, or IPO outputs under `~/Desktop/持仓/测算归档`.
-- Use `scripts/hk_ipo_ytd.py` for HK IPO one-lot first-day returns, hold-to-now returns, win/loss counts, and "稳中一手" follow-up analysis.
+- `FUND_CNY` 基金优先使用盘中估算净值，再回退到正式净值。
+- `FUND_HKD` 和 `FUND_USD` 基金现在先尝试从凯基（KGI）基金详情页获取最新净值，再尝试 Stock Events 的 `.FUND` 页面。
+- 若离岸基金无法从在线数据源解析，skill 回退到 `明细.csv` 中存储的本地快照。
+- 当你希望把成功刷新的基金净值写回 `~/Desktop/持仓/明细.csv` 供后续运行使用时，加 `--write-back-funds`。
+- 每次估值运行会写入或覆盖 `~/Desktop/持仓/总额.csv` 中当天那一行；调试空跑用 `--no-write-history`。
+- 用 `scripts/archive_reports.py` 把临时的估值、退休或 IPO 结果持久化到 `~/Desktop/持仓/测算归档`。
+- 用 `scripts/hk_ipo_ytd.py` 计算港股打新一手首日收益、持有至今收益、盈亏家数，以及“稳中一手”跟投分析。
 
-## Use
+## 使用
 
-Typical prompts:
+常见提问：
 
 - `持仓`
 - `帮我根据截图初始化持仓`
@@ -156,29 +158,29 @@ Typical prompts:
 - `我什么时候可以不上班`
 - `如果我在某个年龄不上班，退休时能领多少退休金`
 
-Workflow:
+工作流：
 
-1. Initialize from natural language or screenshots, or update `~/Desktop/持仓/明细.csv`
-2. Run the script or ask for valuation in chat
-3. Review holdings, P&L, cash, LTI summaries, and the appended retirement countdown
+1. 从自然语言或截图初始化，或更新 `~/Desktop/持仓/明细.csv`
+2. 运行脚本或在对话中请求估值
+3. 查看持仓、盈亏、现金、LTI 汇总，以及附加的退休倒计时
 
-For retirement planning:
+退休规划：
 
-1. Save or update `~/Desktop/持仓/profile.json`
-2. Keep `~/Desktop/持仓/总额.csv` and `~/Desktop/持仓/未来现金流.csv` updated
-3. Run `scripts/retirement_projection.py` or ask in chat
+1. 保存或更新 `~/Desktop/持仓/profile.json`
+2. 保持 `~/Desktop/持仓/总额.csv` 与 `~/Desktop/持仓/未来现金流.csv` 更新
+3. 运行 `scripts/retirement_projection.py` 或在对话中询问
 
-When the prompt is a broad portfolio request such as `持仓`, `持仓总值`, `持仓分析`, or `完整持仓估值报告`, the skill should also run:
+当提问是宽泛的持仓请求（如 `持仓`、`持仓总值`、`持仓分析`、`完整持仓估值报告`）时，skill 还应运行：
 
 ```bash
 python3 scripts/retirement_projection.py --current-total-assets-cny CURRENT_TOTAL_ASSETS
 ```
 
-This appends a short retirement countdown based on the freshly calculated portfolio total instead of an older `总额.csv` snapshot.
+这会基于刚算出的组合总额（而非较旧的 `总额.csv` 快照）附加一段简短的退休倒计时。
 
-## Calculation Archives
+## 测算归档
 
-Persist temporary outputs into the local portfolio folder:
+把临时结果持久化到本地持仓目录：
 
 ```bash
 python3 scripts/archive_reports.py --from-tmp
@@ -187,33 +189,33 @@ python3 scripts/archive_reports.py --retirement-json /path/to/retirement.json
 python3 scripts/archive_reports.py --ipo-csv /path/to/hk_ipo.csv
 ```
 
-Archive root:
+归档根目录：
 
 ```text
 ~/Desktop/持仓/测算归档
 ```
 
-Files are grouped into `估值快照`, `退休测算`, and `港股IPO`.
+文件按 `估值快照`、`退休测算`、`港股IPO` 分组。
 
-## HK IPO Analysis
+## 港股打新分析
 
-Fetch the current year's listed HK IPO table and calculate one-lot returns:
+获取当年已上市港股打新表并计算一手收益：
 
 ```bash
 python3 scripts/hk_ipo_ytd.py --year 2026
 ```
 
-The script writes:
+脚本写入：
 
 ```text
 ~/Desktop/持仓/测算归档/港股IPO/hk_ipo_ytd.csv
 ```
 
-It includes listing date, ticker, one-lot size, listing price, first-day return, estimated first-day close, one-lot first-day P&L, latest price, one-lot current P&L, and current return.
+包含上市日期、代号、每手股数、上市价、首日涨跌、估算首日收盘价、一手首日盈亏、最新价、一手当前盈亏、当前收益率。
 
-## Retirement Countdown
+## 退休倒计时
 
-Typical prompts:
+常见提问：
 
 - `距离退休还有多久？`
 - `退休倒计时版`
@@ -221,7 +223,7 @@ Typical prompts:
 - `距离不上班还差多少钱，预计还需要多久？`
 - `做一个每年还差多少钱的倒计时表`
 
-CLI usage:
+CLI 用法：
 
 ```bash
 python3 scripts/retirement_projection.py
@@ -230,21 +232,21 @@ python3 scripts/retirement_projection.py --stop-month YYYY-MM
 python3 scripts/retirement_projection.py --current-total-assets-cny CURRENT_TOTAL_ASSETS
 ```
 
-What the output includes:
+输出包含：
 
-- `current_age_years`: your current age
-- `current_total_assets_cny`: the asset base used in the calculation
-- `bridge_assets_excluding_social_security_cny`: current assets excluding the social-security account used as future pension source
-- `earliest_no_work_projection`: the earliest stop-working age that still keeps assets above zero through the target lifespan
-- `earliest_no_work_month_projection`: the earliest stop-working month using monthly cash-flow simulation
-- `nearby_month_scenarios`: boundary months around the earliest feasible month
-- `scenario_table`: reference scenarios such as several stop-working ages and retirement age
-- `annual_pension_cny`: estimated annual pension at retirement
-- `monthly_pension_cny`: estimated monthly pension at retirement
-- `projected_social_security_account_cny`: projected personal social-security account balance at retirement
-- `yearly_projection`: yearly gap and ending assets after stopping work
+- `current_age_years`：你的当前年龄
+- `current_total_assets_cny`：计算所用的资产基数
+- `bridge_assets_excluding_social_security_cny`：剔除作为未来养老金来源的社保账户后的当前资产
+- `earliest_no_work_projection`：在目标寿命内仍能保持资产为正的最早停工年龄
+- `earliest_no_work_month_projection`：用按月现金流模拟得出的最早停工月份
+- `nearby_month_scenarios`：最早可行月份附近的边界月份
+- `scenario_table`：参考情景，如若干停工年龄与法定退休年龄
+- `annual_pension_cny`：退休时的预计年养老金
+- `monthly_pension_cny`：退休时的预计月养老金
+- `projected_social_security_account_cny`：退休时预计的社保个人账户余额
+- `yearly_projection`：停工后逐年的缺口与年末资产
 
-Example summary in chat:
+对话中的示例摘要：
 
 ```text
 最早大约在某个年龄可以不上班
@@ -253,7 +255,7 @@ Example summary in chat:
 退休后每年需要动用一部分存款
 ```
 
-Example CLI output shape:
+CLI 输出示例结构：
 
 ```json
 {
@@ -278,29 +280,29 @@ Example CLI output shape:
 }
 ```
 
-## Tests
+## 测试
 
-Hermetic unit tests (no network, no real data) cover the core calculations — bucket classification, currency aggregation, after-tax option intrinsic value, fund-name matching, gold detection, and the pension / age formulas:
+隔离单元测试（无网络、无真实数据）覆盖核心计算——口径分类、币种汇总、期权税后内在价值、基金名称匹配、黄金识别，以及养老金 / 年龄公式：
 
 ```bash
 python3 -m unittest discover -s tests
 ```
 
-## Privacy & Security
+## 隐私与安全
 
-- This skill is designed for local personal finance workflows. Source data stays in local files such as `~/Desktop/持仓/明细.csv` (or `$PORTFOLIO_DIR`).
-- **Filesystem:** scripts read and write only inside the portfolio folder (`~/Desktop/持仓` by default, or `$PORTFOLIO_DIR`).
-- **Network:** scripts make outbound HTTPS requests purely to fetch market data — akshare upstreams (Sina / EastMoney / SGE), `kgi.com.hk`, `stockevents.app`, `open.er-api.com`, and `aastocks.com`. No portfolio data is uploaded; requests carry only public tickers / fund codes.
-- **No secrets, no telemetry:** the skill stores no API keys or credentials and sends no analytics.
-- Example screenshots in this repository are privacy-obfuscated mockups, not real holdings data.
-- Do not commit real portfolio CSV files, screenshots, `profile.json`, or personal identifiers into a public repository — `.gitignore` already excludes these.
+- 本 skill 面向本地个人理财工作流设计。源数据保留在本地文件中，如 `~/Desktop/持仓/明细.csv`（或 `$PORTFOLIO_DIR`）。
+- **文件系统**：脚本仅在持仓目录内读写（默认 `~/Desktop/持仓`，或 `$PORTFOLIO_DIR`）。
+- **网络**：脚本发起的出站 HTTPS 请求仅用于获取市场数据——akshare 上游（新浪 / 东方财富 / 上金所）、`kgi.com.hk`、`stockevents.app`、`open.er-api.com` 和 `aastocks.com`。不上传任何持仓数据；请求只携带公开的股票代码 / 基金代码。
+- **无密钥、无遥测**：本 skill 不存储任何 API 密钥或凭证，也不发送任何分析数据。
+- 本仓库中的示例截图为隐私脱敏的样例，并非真实持仓数据。
+- 不要把真实的持仓 CSV、截图、`profile.json` 或个人标识提交到公开仓库——`.gitignore` 已排除这些。
 
-## Examples
+## 示例
 
-Privacy-obfuscated bookkeeping mockup:
+隐私脱敏的记账样例：
 
-![Privacy-obfuscated bookkeeping mockup](assets/privacy-obfuscated-bookkeeping-mockup.png)
+![隐私脱敏的记账样例](assets/privacy-obfuscated-bookkeeping-mockup.png)
 
-Privacy-obfuscated valuation report mockup:
+隐私脱敏的估值报告样例：
 
-![Privacy-obfuscated valuation report mockup](assets/privacy-obfuscated-valuation-report.png)
+![隐私脱敏的估值报告样例](assets/privacy-obfuscated-valuation-report.png)
