@@ -1,0 +1,25 @@
+{
+  "name": "stock-portfolio-valuation",
+  "version": "1.0.0",
+  "description": "Personal portfolio valuation and China-social-security retirement projection. Reads holdings from CSV or screenshots, fetches US/HK/A-share stock and fund quotes, and computes valuation, P&L, cash, and LTI summaries across USD/HKD/CNY.",
+  "author": {
+    "name": "chenyuan1"
+  },
+  "homepage": "https://github.com/apack1001/stock-portfolio-valuation",
+  "repository": "https://github.com/apack1001/stock-portfolio-valuation",
+  "license": "MIT",
+  "keywords": [
+    "portfolio",
+    "valuation",
+    "stocks",
+    "funds",
+    "retirement",
+    "finance",
+    "akshare",
+    "a-share",
+    "hong-kong"
+  ],
+  "skills": [
+    "./"
+  ]
+}
