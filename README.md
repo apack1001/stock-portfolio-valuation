@@ -299,6 +299,7 @@ python3 scripts/fetch_futu_deals.py --start 2024-01-01 --write-ledger
 ```
 
 说明：
+- **实时账户数据**：输出 `account_summary`（总资产/证券/基金/现金）与 `today_pl_by_currency`（今日盈亏，来自富途 `today_pl_val`，与富途 App 一致），比 akshare 日线更实时、口径更准。
 - **只读**：仅查询持仓/资金，绝不下单或解锁交易。
 - **仅覆盖证券**（股票 / 场内 ETF / 期权 / 期货）；**不提供场外公募基金净值**，基金仍按盘中估算 / 官方净值，T+1 为其固有属性。
 - `--write-back` 保守：同一代码若同时存在于 LTI 等其它账户，跳过自动写、仅标记；CSV 有而 Futu 查不到的富途行只标记疑似清仓，绝不自动删除。

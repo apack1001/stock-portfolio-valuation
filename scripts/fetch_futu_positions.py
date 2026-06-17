@@ -26,6 +26,7 @@
 import sys, os, json, csv, argparse, logging
 from pathlib import Path
 from datetime import datetime
+from collections import defaultdict
 
 # futu-api 会把连接日志打到 stdout，污染本脚本的 JSON 输出；全局关闭日志
 logging.disable(logging.CRITICAL)
@@ -124,7 +125,7 @@ def fetch_futu():
         if m is not None:
             markets.append((name, m))
 
-    positions, cash = [], {}
+    positions, account = [], None
     errors = []
     seen = set()
     for name, market in markets:
@@ -147,20 +148,25 @@ def fetch_futu():
                         "qty": to_float(r.get("qty")),
                         "cost_price": to_float(r.get("cost_price")),
                         "market_val": to_float(r.get("market_val")),
+                        "pl_val": to_float(r.get("pl_val")),
+                        "today_pl_val": to_float(r.get("today_pl_val")),
                         "currency": str(r.get("currency", "")).replace("Currency.", "") or None,
                     })
             else:
                 errors.append(f"{name} 持仓查询失败: {data}")
-            # 现金（尽力而为，不同版本字段不一）
-            try:
-                cret, cinfo = ctx.accinfo_query(trd_env=ft.TrdEnv.REAL)
-                if cret == ft.RET_OK and not cinfo.empty:
-                    cur = str(cinfo.iloc[0].get("currency", name)).replace("Currency.", "")
-                    cashv = to_float(cinfo.iloc[0].get("cash"))
-                    if cashv is not None:
-                        cash[cur] = cashv
-            except Exception as e:
-                errors.append(f"{name} 资金查询跳过: {e}")
+            # 账户总览只取一次（首个市场=HK 的上下文返回整账户的 HKD 视图）
+            if account is None:
+                try:
+                    aret, ainfo = ctx.accinfo_query(trd_env=ft.TrdEnv.REAL)
+                    if aret == ft.RET_OK and not ainfo.empty:
+                        row = ainfo.iloc[0]
+                        account = {k: to_float(row.get(k)) for k in
+                                   ("total_assets", "securities_assets", "fund_assets",
+                                    "bond_assets", "market_val", "cash",
+                                    "hk_cash", "us_cash", "cn_cash")}
+                        account["currency"] = str(row.get("currency", "")).replace("Currency.", "")
+                except Exception as e:
+                    errors.append(f"账户总览查询跳过: {e}")
         except Exception as e:
             errors.append(f"{name} 连接/查询异常: {e}")
         finally:
@@ -173,7 +179,7 @@ def fetch_futu():
     if not positions and errors:
         fail("未取得任何持仓。常见原因：OpenD 未启动/未登录、行情或交易权限不足。详情: "
              + " | ".join(errors))
-    return positions, cash, errors
+    return positions, account, errors
 
 
 def reconcile(positions, cash, rows):
@@ -285,8 +291,22 @@ def main():
     if rows is None:
         fail(f"未找到 {CSV_PATH}，请先初始化持仓。")
 
-    positions, cash, errors = fetch_futu()
-    report, csv_only = reconcile(positions, cash, rows)
+    positions, account, errors = fetch_futu()
+    report, csv_only = reconcile(positions, account, rows)
+
+    # 今日盈亏（来自 Futu today_pl_val，与 App 一致），按持仓币种分开
+    today_pl = defaultdict(float)
+    for p in positions:
+        if p.get("today_pl_val") is not None:
+            today_pl[p.get("currency") or "?"] += p["today_pl_val"]
+
+    # 写回现金用：从账户总览派生分币种现金
+    cash = {}
+    if account:
+        if account.get("hk_cash") is not None:
+            cash["HKD"] = account["hk_cash"]
+        if account.get("us_cash") is not None:
+            cash["USD"] = account["us_cash"]
 
     changes = []
     if args.write_back:
@@ -297,8 +317,9 @@ def main():
     out = {
         "ok": True,
         "opend": f"{OPEND_HOST}:{OPEND_PORT}",
+        "account_summary": account,          # 总资产/证券/基金/现金（accinfo，HKD 视图）
+        "today_pl_by_currency": {k: round(v, 2) for k, v in today_pl.items()},
         "futu_positions": len(positions),
-        "cash_by_currency": cash,
         "reconcile": report,
         "csv_only_suspected_closed": csv_only,
         "warnings": errors,
@@ -306,11 +327,18 @@ def main():
     }
 
     if args.summary:
-        print(f"OpenD {out['opend']} ｜ Futu 实仓 {len(positions)} 笔 ｜ 现金 {cash}")
-        print(f"{'代码':<12}{'名称':<14}{'Futu股数':>10}{'CSV富途':>10}{'状态':>22}")
+        if account:
+            cur = account.get("currency", "")
+            print(f"账户总览({cur}): 总资产 {account.get('total_assets'):,.2f} ｜ "
+                  f"证券 {account.get('securities_assets'):,.2f} ｜ "
+                  f"基金 {account.get('fund_assets'):,.2f} ｜ 现金 {account.get('cash'):,.2f}")
+        print("今日盈亏(Futu, 按币种):", {k: round(v, 2) for k, v in today_pl.items()})
+        print(f"\nOpenD {out['opend']} ｜ Futu 实仓 {len(positions)} 笔")
+        print(f"{'代码':<11}{'名称':<13}{'股数':>8}{'今日盈亏':>10}{'累计盈亏':>11}{'状态':>20}")
         for it in report:
-            print(f"{it['market']}.{it['code']:<8}{(it.get('name') or '')[:12]:<14}"
-                  f"{(it['qty'] or 0):>10g}{(it['csv_futu_shares'] or 0):>10g}{it['status']:>22}")
+            print(f"{it['market']}.{it['code']:<7}{(it.get('name') or '')[:11]:<13}"
+                  f"{(it['qty'] or 0):>8g}{(it.get('today_pl_val') or 0):>10,.0f}"
+                  f"{(it.get('pl_val') or 0):>11,.0f}{it['status']:>20}")
         for c in csv_only:
             print(f"{c['market']}.{c['code']}  {c['name']}  CSV{c['csv_shares']}  {c['status']}")
         if errors:

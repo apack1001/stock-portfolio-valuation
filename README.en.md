@@ -299,6 +299,7 @@ python3 scripts/fetch_futu_deals.py --start 2024-01-01 --write-ledger
 ```
 
 Notes:
+- **Real-time account data:** emits `account_summary` (total / securities / fund / cash) and `today_pl_by_currency` (today's P&L from Futu's `today_pl_val`, matching the Futu app) — more real-time and accurate than akshare daily closes.
 - **Read-only:** queries positions / cash only; it never places orders or unlocks trading.
 - **Securities only** (stocks / listed ETFs / options / futures); it does **not** provide OTC mutual-fund NAV — funds still use intraday-estimated / official NAV, and T+1 is inherent to funds.
 - `--write-back` is conservative: if a code is also held under another account (e.g. LTI), it is skipped and only flagged; Futu-account rows present in the CSV but missing from Futu are flagged as possibly closed, never auto-deleted.
