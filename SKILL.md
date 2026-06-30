@@ -253,6 +253,11 @@ python3 ${SKILL_DIR}/scripts/hk_ipo_subscribing.py --source aastocks  # 强制�
   - ★★ **题材/概念中小盘**：热门赛道但未盈利/基本面弱、盘小波动大——博暗盘弹性
   - ★ **小盘/冷门/GEM**：袖珍盘、流动性差、回避倾向（GEM 尤其慎）
 - 结论里区分两类玩法：**求稳吃确定性**（大盘龙头，破发风险低）vs **博暗盘弹性**（小盘题材，涨跌都猛）；并提示**高入场费**标的（如一手数万港币）的资金占用。
+- **脚手架脚本**（把结构字段从招股清单 seed 好，省去手抄）：先跑 `hk_ipo_subscribing.py` 刷新当日招股清单，再跑
+  ```bash
+  python3 ${SKILL_DIR}/scripts/hk_ipo_niubility.py --summary
+  ```
+  它读最新 `hk_ipo_subscribing_*.csv`，生成 `~/Desktop/持仓/测算归档/港股IPO/hk_ipo_niubility_scaffold_{date}.csv`：**代号/名称/赛道/招股价/每手/一手入场费/上市日/暗盘日 已自动填好**，留空 7 列「预期上市后市值/市值口径/牛逼度/是否盈利/基石/保荐人/打新倾向」**由你按上面框架联网研究补全**（脚本不臆造市值与评级）。填完另存为 `hk_ipo_niubility_{date}.csv` 归档。
 
 输出板块格式建议：
 ```text
