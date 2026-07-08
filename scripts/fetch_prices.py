@@ -44,13 +44,38 @@ def fetch_us_price(code: str):
     if df is None or df.empty:
         return None
     return float(df["close"].iloc[-1])
+def _run_with_timeout(fn, timeout_s=15):
+    """在子线程中运行 fn()，超时则返回 None（不 join 僵死线程）。"""
+    import threading
+    result = [None]
+    exc = [None]
+
+    def _target():
+        try:
+            result[0] = fn()
+        except Exception as e:
+            exc[0] = e
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    t.join(timeout_s)
+    if t.is_alive():
+        return None  # 线程仍在跑（网络卡住），视为超时
+    if exc[0] is not None:
+        raise exc[0]
+    return result[0]
+
+
 def fetch_hk_price(code: str):
-    """港股价格：优先用新浪数据源（stock_hk_daily），失败则回退东方财富（stock_hk_hist）"""
+    """港股价格：优先用新浪数据源（stock_hk_daily），失败则回退东方财富（stock_hk_hist）。
+    两路均有 15s 超时保护（threading），避免新浪/东财连接无限 hang。"""
     import akshare as ak
+
     sym = str(code).zfill(5)
-    # 主数据源：新浪财经（稳定，国内可访问）
+
+    # 主数据源：新浪财经
     try:
-        df = ak.stock_hk_daily(symbol=sym, adjust="")
+        df = _run_with_timeout(lambda: ak.stock_hk_daily(symbol=sym, adjust=""), timeout_s=15)
         if df is not None and not df.empty and "close" in df.columns:
             return float(df["close"].iloc[-1])
     except Exception:
@@ -59,8 +84,11 @@ def fetch_hk_price(code: str):
     try:
         start = (datetime.now() - timedelta(days=10)).strftime("%Y%m%d")
         end = datetime.now().strftime("%Y%m%d")
-        df = ak.stock_hk_hist(symbol=sym, period="daily", start_date=start, end_date=end, adjust="")
-        if df is not None and not df.empty:
+        df = _run_with_timeout(
+            lambda: ak.stock_hk_hist(symbol=sym, period="daily", start_date=start, end_date=end, adjust=""),
+            timeout_s=15,
+        )
+        if df is not None and not df.empty and "收盘" in df.columns:
             return float(df["收盘"].iloc[-1])
     except Exception:
         pass
