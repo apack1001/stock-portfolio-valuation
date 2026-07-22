@@ -350,6 +350,9 @@ python3 ${SKILL_DIR}/scripts/a_share_daily_brief.py             # JSON（撰写�
 | ... |
 **CNY 合计：市值 ¥X ｜ 盈亏 +/-¥X（X%）**
 ---
+### 📈 今年至今资产走势
+> 由 `asset_trend.py` 生成（见 Step 5.5），整段原样嵌入：一张 mermaid 折线图（当年每日总资产，CNY 口径、单位万）+ 一行 YTD 摘要（年初值→现值、涨跌幅、年内峰谷）。年内数据点不足 2 个时输出脚本提示语即可。
+---
 ### 📈 总资产速览
 > 参考汇率（{日期}）：1 USD = {X} CNY = {X} HKD ｜ 1 HKD = {X} CNY
 **投资资产口径**（排除 LTI、活期、存款、应收款、社保、货币基金/类现金）
@@ -424,6 +427,16 @@ python3 ${SKILL_DIR}/scripts/retirement_projection.py --current-total-assets-cny
 📅 昨日（YYYY-MM-DD）：¥X / $X　→　今日：¥X / $X　变动：▲/▼¥X（X%）
 ```
 若 CSV 只有一行（首次记录）则跳过对比。
+---
+### Step 5.5：今年至今资产走势图（持仓报告自动追加）
+必须在 Step 3（`fetch_prices.py`，已 upsert 今日数据到 `总额.csv`）之后运行：
+```bash
+python3 ${SKILL_DIR}/scripts/asset_trend.py
+```
+- 读 `~/Desktop/持仓/总额.csv`，过滤当年，输出一段 ```mermaid xychart-beta``` 折线图（CNY 口径、单位万）+ 一行 YTD 摘要（年初值→现值、涨跌幅、年内峰谷、数据点数）。
+- 将脚本输出**原样整段**贴入报告的「📈 今年至今资产走势」区块（在「总资产速览」上方）。
+- 点数超过 40 时自动等距抽稀（首尾必留）；年内不足 2 个点时输出"曲线未成形"提示，不阻塞报告。
+- 可选参数：`--currency usd` 切美元口径、`--year YYYY` 指定年份、`--max-points N` 调抽稀上限。
 ---
 ## CSV 字段说明
 | 字段 | 说明 |
