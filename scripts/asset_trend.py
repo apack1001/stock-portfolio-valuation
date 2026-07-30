@@ -6,15 +6,19 @@
 输出一段可直接嵌入 Markdown 报告的 mermaid 折线图 + YTD 摘要。
 
 用法:
-  python3 asset_trend.py                 # 输出当年 CNY 走势图
+  python3 asset_trend.py                 # 输出当年 CNY 走势图（mermaid）
   python3 asset_trend.py --currency usd  # 按美元口径
   python3 asset_trend.py --year 2026     # 指定年份
   python3 asset_trend.py --max-points 40 # mermaid x 轴过密时的抽稀上限
+  python3 asset_trend.py --png           # 额外渲染真实 PNG 到 持仓目录/asset_trend_<year>.png
+  python3 asset_trend.py --png /path.png # 指定 PNG 输出路径
 
 设计要点:
 - 数据源与 fetch_prices.py 共用 ~/Desktop/持仓/总额.csv（同一 TCC 授权路径，
   作为 skill 目录下的真实脚本文件运行才有 Desktop 读权限）。
 - 点数超过 max_points 时等距抽稀（首尾必留），避免 mermaid x 轴标签重叠。
+- PNG 用全量点绘制：红实线=总资产(含 LTI，左轴)，灰虚线=投资盘累计盈亏(不含 LTI，右轴)，
+  两轴背离一眼看出"总资产涨≠投资赚钱"。matplotlib 缺失时仅告警、不影响 mermaid 输出。
 """
 import os
 import csv
@@ -109,6 +113,112 @@ def build_summary(points, currency):
     )
 
 
+def load_ytd_pnl(year, currency):
+    """读取当年 (date, pnl_excl_lti) 升序列表，用于 PNG 右轴。缺列返回空。"""
+    pnl_col = "pnl_usd_excl_lti" if currency == "usd" else "pnl_cny_excl_lti"
+    if not TOTAL_PATH.exists():
+        return {}
+    with open(TOTAL_PATH, "r", encoding="utf-8-sig") as f:
+        rows = list(csv.DictReader(f))
+    prefix = f"{year}-"
+    out = {}
+    for r in rows:
+        d = (r.get("date") or "").strip()
+        v = to_float(r.get(pnl_col))
+        if d.startswith(prefix) and v is not None:
+            out[d] = v  # 同日保留最后一条
+    return out
+
+
+def _cjk_font():
+    """在 macOS 上挑一个中日韩可用字体并注册，返回其字体名（挑不到返回 None）。"""
+    from matplotlib import font_manager as fm
+    candidates = [
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
+    ]
+    for fp in candidates:
+        if os.path.exists(fp):
+            try:
+                fm.fontManager.addfont(fp)
+                return fm.FontProperties(fname=fp).get_name()
+            except Exception:
+                continue
+    return None
+
+
+def render_png(points, year, currency, out_path):
+    """用全量点渲染 PNG：总资产(左轴) + 投资盘累计盈亏(右轴)。返回实际写入路径或 None。"""
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ 未安装 matplotlib，PNG 跳过（mermaid 已正常输出）：{e}")
+        return None
+
+    fname = _cjk_font()
+    if fname:
+        plt.rcParams["font.family"] = fname
+    else:
+        print("⚠️ 未找到中日韩字体，PNG 中文可能显示为方块。")
+    plt.rcParams["axes.unicode_minus"] = False
+
+    unit = "美元" if currency == "usd" else "人民币"
+    symbol = "US$" if currency == "usd" else "¥"
+    dates = [d for d, _ in points]
+    tc = [v / 10000 for _, v in points]
+    pnl_map = load_ytd_pnl(year, currency)
+    pnl = [pnl_map.get(d) for d in dates]
+    x = list(range(len(tc)))
+
+    fig, ax = plt.subplots(figsize=(13, 6))
+    ax.plot(x, tc, color="#c0392b", lw=2, label="总资产(含LTI)")
+    ax.fill_between(x, tc, min(tc) - 3, color="#c0392b", alpha=0.06)
+
+    pi = tc.index(max(tc))
+    ti = tc.index(min(tc))
+    ax.scatter([pi, ti], [tc[pi], tc[ti]], color=["#27ae60", "#e67e22"], zorder=5, s=45)
+    ax.annotate(f"峰值 {tc[pi]:.1f}万\n{dates[pi]}", (pi, tc[pi]),
+                textcoords="offset points", xytext=(0, 12), ha="center", fontsize=9, color="#27ae60")
+    ax.annotate(f"谷值 {tc[ti]:.1f}万\n{dates[ti]}", (ti, tc[ti]),
+                textcoords="offset points", xytext=(0, -28), ha="center", fontsize=9, color="#e67e22")
+    ax.scatter([x[-1]], [tc[-1]], color="#c0392b", zorder=5, s=45)
+    ax.annotate(f"当前 {tc[-1]:.1f}万", (x[-1], tc[-1]),
+                textcoords="offset points", xytext=(-8, 10), ha="right", fontsize=9, color="#c0392b")
+
+    handles, labels = ax.get_legend_handles_labels()
+    if any(p is not None for p in pnl):
+        ax2 = ax.twinx()
+        px = [i for i, p in zip(x, pnl) if p is not None]
+        py = [p / 10000 for p in pnl if p is not None]
+        ax2.plot(px, py, color="#7f8c8d", lw=1.3, ls="--", label="投资盘累计盈亏(不含LTI)")
+        ax2.set_ylabel("投资盘累计盈亏（万%s）" % symbol, color="#7f8c8d", fontsize=10)
+        ax2.tick_params(axis="y", colors="#7f8c8d")
+        h2, l2 = ax2.get_legend_handles_labels()
+        handles += h2
+        labels += l2
+
+    step = max(1, len(dates) // 20)
+    ax.set_xticks(x[::step])
+    ax.set_xticklabels([dates[i][5:] for i in x[::step]], rotation=45, fontsize=8)
+    ax.set_ylabel("总资产（万%s）" % symbol, fontsize=10)
+    ax.set_title(f"{year} YTD 总资产走势（{unit}）  ·  截至 {dates[-1][5:]}", fontsize=13)
+    ax.grid(alpha=0.25)
+    ax.legend(handles, labels, loc="lower right", fontsize=9)
+    fig.tight_layout()
+    try:
+        fig.savefig(out_path, dpi=130)
+    except Exception as e:  # noqa: BLE001
+        print(f"⚠️ PNG 写入失败：{e}")
+        return None
+    finally:
+        plt.close(fig)
+    return out_path
+
+
 def main():
     year = args.year or datetime.now().strftime("%Y")
     points, col = load_ytd(year, args.currency)
@@ -124,6 +234,12 @@ def main():
     print(build_chart(points, args.currency))
     print()
     print(build_summary(points, args.currency))
+    if args.png is not None:
+        out_path = args.png if args.png != "__default__" else str(BASE_DIR / f"asset_trend_{year}.png")
+        saved = render_png(points, year, args.currency, out_path)
+        if saved:
+            print()
+            print(f"🖼️ PNG 已保存：{saved}")
 
 
 if __name__ == "__main__":
@@ -133,5 +249,7 @@ if __name__ == "__main__":
     parser.add_argument("--year", default=None, help="指定年份，默认当年")
     parser.add_argument("--max-points", type=int, default=40,
                         help="mermaid x 轴最多显示的点数，超出等距抽稀")
+    parser.add_argument("--png", nargs="?", const="__default__", default=None,
+                        help="额外渲染真实 PNG；可跟输出路径，缺省存到 持仓目录/asset_trend_<year>.png")
     args = parser.parse_args()
     main()
