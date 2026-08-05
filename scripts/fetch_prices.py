@@ -259,8 +259,8 @@ def fetch_stockevents_fund_price(code: str, currency: str):
         resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
         if resp.status_code != 200:
             return None
-        symbol = "HK\\$" if currency == "HKD" else "\\$"
-        match = re.search(rf"{symbol}([0-9]+(?:\\.[0-9]+)?)", resp.text)
+        symbol = r"HK\$" if currency == "HKD" else r"\$"
+        match = re.search(rf"{symbol}([0-9]+(?:\.[0-9]+)?)", resp.text)
         if not match:
             return None
         price = to_float(match.group(1))
