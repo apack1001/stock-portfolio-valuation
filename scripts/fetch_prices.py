@@ -153,7 +153,15 @@ def fetch_fund_estimation_map():
     if _FUND_ESTIMATION_CACHE is not None:
         return _FUND_ESTIMATION_CACHE
     import akshare as ak
-    df = ak.fund_value_estimation_em(symbol="全部")
+    try:
+        df = ak.fund_value_estimation_em(symbol="全部")
+    except Exception:
+        # 东财盘中估值接口不稳定；失败时缓存空表，让调用方回退正式净值而非快照
+        _FUND_ESTIMATION_CACHE = {}
+        return _FUND_ESTIMATION_CACHE
+    if df is None or df.empty:
+        _FUND_ESTIMATION_CACHE = {}
+        return _FUND_ESTIMATION_CACHE
     estimate_col = _find_col(df.columns, "估算数据-估算值")
     estimate_pct_col = _find_col(df.columns, "估算数据-估算增长率")
     official_col = _find_col(df.columns, "公布数据-单位净值")
